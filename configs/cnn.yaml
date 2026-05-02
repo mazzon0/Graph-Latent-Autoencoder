@@ -1,0 +1,21 @@
+model: "cnn"
+optimizer: "adamw"
+loss: "cross_entropy"
+start_epoch: 0
+end_epoch: 9
+from_checkpoint: false
+checkpoint_file: ""
+batch_size: 32
+
+model_cnn:
+  image_shape: [3, 64, 64]
+  channels: [3, 8, 16, 32]
+  mlp_sizes: [2048, 1024, 512, 256]
+
+optimizer_adamw:
+  lr: 1e-3
+  weight_decay: 0.05
+  scheduler: "constant"
+
+loss_cross_entropy:
+  
