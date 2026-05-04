@@ -1,12 +1,15 @@
 import torch.nn as nn
 from .graph_latent_autoencoder_loss import GraphLatentAutoencoderLoss
 from .gating_regularizers import ProbabilityRegularizer, DiscreteRegularizer
+from .reconstruction_loss import SSIMLoss
 
 def get_loss(config: dict):
 
     match config.get('reconstruction', "mse"):
         case 'mse':
             reconstruction_loss = nn.MSELoss()
+        case 'ssim':
+            reconstruction_loss = SSIMLoss()
 
     match config.get('nodes', "probs"):
         case 'probs':

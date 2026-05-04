@@ -17,6 +17,6 @@ optimizer_adamw:
   scheduler: "constant"
 
 loss:
-  reconstruction: "mse"
+  reconstruction: "ssim"
   nodes: "probs"
   edges: "probs"
