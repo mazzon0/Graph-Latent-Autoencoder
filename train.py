@@ -37,8 +37,7 @@ def load_config(filename: str):
             MODEL_CONFIG = config.get('model_' + MODEL, None)
             OPTIMIZER = config.get('optimizer', "adamw")
             OPTIMIZER_CONFIG = config.get('optimizer_' + OPTIMIZER, None)
-            LOSS = config.get('loss', "cross_entropy")
-            LOSS_CONFIG = config.get('loss_' + LOSS, None)
+            LOSS = config.get('loss', dict())
 
 def collate_autoencoder(batch):
     # only returns the images
@@ -86,7 +85,7 @@ def train():
 
     # Initialize model, loss and optimizer
     model = get_model(MODEL, MODEL_CONFIG).to(device)
-    loss_fn = get_loss(LOSS, LOSS_CONFIG).to(device)
+    loss_fn = get_loss(LOSS).to(device)
     optimizer = get_optimizer(model, OPTIMIZER, OPTIMIZER_CONFIG)
     if FROM_CHECKPOINT:
         loaded_data = torch.load(CHECKPOINT_FILE, map_location=device)
@@ -101,36 +100,43 @@ def train():
     
     # Training loop
     best_loss = float('inf')
-    for epoch in range(START_EPOCH, END_EPOCH):
+    for epoch in range(START_EPOCH, END_EPOCH + 1):
         # Train
         model.train()
-        train_losses = {'loss': 0.0}
+        train_losses = {'loss': 0.0, 'reconstruction': 0.0, 'nodes': 0.0, 'edges': 0.0}
         
         for images in train_loader:
             images = torch.stack(images).to(device)
 
             with torch.amp.autocast('cuda'):
                 outputs = model(images)
-                loss = loss_fn(outputs, images)
+                loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images)
 
             optimizer.zero_grad()
-            scaler.scale(loss).backward()
+            scaler.scale(loss['loss']).backward()
             scaler.step(optimizer)
             scaler.update()
 
-            train_losses['loss'] += loss
+            train_losses['loss'] += loss['loss']
+            train_losses['reconstruction'] += loss['reconstruction']
+            train_losses['edges'] += loss['edges']
+            train_losses['nodes'] += loss['nodes']
 
         # Validation
         model.eval()
-        val_losses = {'loss': 0}
+        val_losses = {'loss': 0.0, 'reconstruction': 0.0, 'nodes': 0.0, 'edges': 0.0}
 
         with torch.no_grad():
             for images in val_loader:
                 images = torch.stack(images).to(device)
                 
                 outputs = model(images)
-                loss = loss_fn(outputs, images)
-                val_losses['loss'] += loss
+                loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images)
+                
+                val_losses['loss'] += loss['loss']
+                val_losses['reconstruction'] += loss['reconstruction']
+                val_losses['edges'] += loss['edges']
+                val_losses['nodes'] += loss['nodes']
         
         # Save best and last model
         checkpoint = {
@@ -141,18 +147,17 @@ def train():
             'loss': val_losses['loss']
         }
         torch.save(checkpoint, "last.pth")
-        if val_losses['loss'] > best_loss:
+        if val_losses['loss'] < best_loss:
             best_loss = val_losses['loss']
             torch.save(checkpoint, "best.pth")
 
         scheduler.step()
 
-        avg_loss_train = train_losses['loss'] / len(train_loader)
-        avg_loss_val = val_losses['loss'] / len(val_loader)
-
+        train_losses = {k: v / len(train_loader) for k, v in train_losses.items()}
+        val_losses = {k: v / len(val_loader) for k, v in val_losses.items()}
         print(f"Epoch {epoch}/{END_EPOCH}")
-        print(f"Training losses: {avg_loss_train}")
-        print(f"Validation losses: {avg_loss_val}")
+        print(f"Training losses: {train_losses}")
+        print(f"Validation losses: {val_losses}")
         print(f"lr: {scheduler.get_last_lr()}")
         print("-" * 40)
         

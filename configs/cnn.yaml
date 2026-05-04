@@ -1,6 +1,5 @@
 model: "cnn"
 optimizer: "adamw"
-loss: "mse"
 start_epoch: 0
 end_epoch: 9
 from_checkpoint: false
@@ -17,4 +16,7 @@ optimizer_adamw:
   weight_decay: 0.05
   scheduler: "constant"
 
-loss_mse:
+loss:
+  reconstruction: "mse"
+  nodes: "probs"
+  edges: "probs"

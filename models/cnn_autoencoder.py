@@ -78,4 +78,8 @@ class CnnAutoencoder(nn.Module):
         x = self.mlp_encoder(x)
         x = self.mlp_decoder(x)
         x = self.cnn_decoder(x)
-        return x
+        return {
+            'image': x,
+            'nodes': torch.zeros(1, dtype=torch.float32),
+            'edges': torch.zeros(1, dtype=torch.float32)
+        }

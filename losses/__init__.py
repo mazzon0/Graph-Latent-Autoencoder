@@ -1,9 +1,27 @@
 import torch.nn as nn
+from .graph_latent_autoencoder_loss import GraphLatentAutoencoderLoss
+from .gating_regularizers import ProbabilityRegularizer, DiscreteRegularizer
 
-def get_loss(name: str, config: dict):
+def get_loss(config: dict):
 
-    match(name):
+    match config.get('reconstruction', "mse"):
         case 'mse':
-            return nn.MSELoss() # TODO wrap and return a dict
+            reconstruction_loss = nn.MSELoss()
 
-    return None
+    match config.get('nodes', "probs"):
+        case 'probs':
+            nodes_reg = ProbabilityRegularizer()
+        case 'discr':
+            nodes_reg = DiscreteRegularizer(0.5)
+
+    match config.get('edges', "probs"):
+        case 'probs':
+            edges_reg = ProbabilityRegularizer()
+        case 'discr':
+            edges_reg = DiscreteRegularizer(0.5)
+
+    alpha = config.get('alpha', 1.0)
+    beta  = config.get('beta', 1.0)
+    gamma = config.get('gamma', 1.0)
+
+    return GraphLatentAutoencoderLoss(reconstruction_loss, nodes_reg, edges_reg, alpha, beta, gamma)
