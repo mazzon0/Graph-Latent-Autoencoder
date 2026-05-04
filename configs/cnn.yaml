@@ -5,7 +5,7 @@ start_epoch: 0
 end_epoch: 9
 from_checkpoint: false
 checkpoint_file: ""
-batch_size: 32
+batch_size: 256
 
 model_cnn:
   image_shape: [3, 64, 64]
@@ -13,7 +13,7 @@ model_cnn:
   mlp_sizes: [2048, 1024, 512, 256]
 
 optimizer_adamw:
-  lr: 1e-3
+  lr: 1e-5
   weight_decay: 0.05
   scheduler: "constant"
 

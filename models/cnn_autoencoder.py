@@ -45,8 +45,8 @@ class CnnAutoencoder(nn.Module):
         for i in range(len(mlp_sizes)-1, 0, -1):
             self.mlp_decoder.add_module(f"dec_mlp_{i}", nn.Linear(in_features=mlp_sizes[i], out_features=mlp_sizes[i-1]))
             self.mlp_decoder.add_module(f"dec_mlp_act_{i}", nn.LeakyReLU())
-        self.mlp_decoder.add_module(nn.Unflatten(1,
-            [channels[-1], self.image_shape[1] // 2**(len(channels)-1), self.image_shape[2] // 2**(len(channels)-1)]))
+        self.mlp_decoder.add_module('unflatten',
+            nn.Unflatten(1, [channels[-1], self.image_shape[1] // 2**(len(channels)-1), self.image_shape[2] // 2**(len(channels)-1)]))
 
         # CNN Decoder
         self.cnn_decoder = nn.Sequential()

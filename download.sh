@@ -24,4 +24,3 @@ rm val2017.zip
 
 echo "--- Setup Complete ---"
 echo "Structure created at $(pwd):"
-ls -R

@@ -40,11 +40,17 @@ def load_config(filename: str):
             LOSS = config.get('loss', "cross_entropy")
             LOSS_CONFIG = config.get('loss_' + LOSS, None)
 
+def collate_autoencoder(batch):
+    # only returns the images
+    images = [item[0] for item in batch]
+    return images
+
 def train():
     if torch.cuda.is_available():   print("Training on CUDA GPU")
     else:                           print("Training on CPU")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     scaler = torch.amp.GradScaler('cuda')
+    torch.multiprocessing.set_sharing_strategy('file_descriptor')
 
     # Data Preprocessing
     train_transform = v2.Compose([
@@ -75,19 +81,20 @@ def train():
         transform=val_transform
     )
 
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
+    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True, collate_fn=collate_autoencoder)
+    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, collate_fn=collate_autoencoder)
 
     # Initialize model, loss and optimizer
-    model = get_model(MODEL, MODEL_CONFIG)
-    loss_fn = get_loss(LOSS, LOSS_CONFIG)
+    model = get_model(MODEL, MODEL_CONFIG).to(device)
+    loss_fn = get_loss(LOSS, LOSS_CONFIG).to(device)
     optimizer = get_optimizer(model, OPTIMIZER, OPTIMIZER_CONFIG)
-    lr_lambda = get_lr_lambda(OPTIMIZER_CONFIG.get('lr_lambda', "constant"))
     if FROM_CHECKPOINT:
         loaded_data = torch.load(CHECKPOINT_FILE, map_location=device)
         model.load_state_dict(loaded_data['model_state_dict'], strict=True)
         optimizer.load_state_dict(loaded_data['optimizer_state_dict'])
-        
+    
+    lr_lambda_name = OPTIMIZER_CONFIG.get('lr_lambda', "constant")
+    lr_lambda = get_lr_lambda(lr_lambda_name, OPTIMIZER_CONFIG.get("scheduler_" + lr_lambda_name, dict()), END_EPOCH)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch=START_EPOCH-1)
     if FROM_CHECKPOINT:
         scheduler.load_state_dict(loaded_data['scheduler_state_dict'])
@@ -97,9 +104,9 @@ def train():
     for epoch in range(START_EPOCH, END_EPOCH):
         # Train
         model.train()
-        train_loss = {'loss': 0.0}
+        train_losses = {'loss': 0.0}
         
-        for images, _ in train_loader:
+        for images in train_loader:
             images = torch.stack(images).to(device)
 
             with torch.amp.autocast('cuda'):
@@ -107,23 +114,23 @@ def train():
                 loss = loss_fn(outputs, images)
 
             optimizer.zero_grad()
-            scaler.scale(loss['loss']).backward()
+            scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
 
-            train_loss['loss'] += loss['loss']
+            train_losses['loss'] += loss
 
         # Validation
         model.eval()
         val_losses = {'loss': 0}
 
         with torch.no_grad():
-            for images, _ in val_loader:
+            for images in val_loader:
                 images = torch.stack(images).to(device)
                 
                 outputs = model(images)
-                loss_dict = loss_fn(outputs, images)
-                val_losses['loss'] += loss_dict['loss']
+                loss = loss_fn(outputs, images)
+                val_losses['loss'] += loss
         
         # Save best and last model
         checkpoint = {
@@ -140,10 +147,13 @@ def train():
 
         scheduler.step()
 
+        avg_loss_train = train_losses['loss'] / len(train_loader)
+        avg_loss_val = val_losses['loss'] / len(val_loader)
+
         print(f"Epoch {epoch}/{END_EPOCH}")
-        print(f"Training losses: {train_loss}")
-        print(f"Validation losses: {val_losses}")
-        print(f"lr: {scheduler.get_lr()}")
+        print(f"Training losses: {avg_loss_train}")
+        print(f"Validation losses: {avg_loss_val}")
+        print(f"lr: {scheduler.get_last_lr()}")
         print("-" * 40)
         
 if __name__ == '__main__':
