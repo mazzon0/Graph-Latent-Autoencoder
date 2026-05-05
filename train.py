@@ -92,7 +92,7 @@ def train():
         model.load_state_dict(loaded_data['model_state_dict'], strict=True)
         optimizer.load_state_dict(loaded_data['optimizer_state_dict'])
     
-    lr_lambda_name = OPTIMIZER_CONFIG.get('lr_lambda', "constant")
+    lr_lambda_name = OPTIMIZER_CONFIG.get('scheduler', "constant")
     lr_lambda = get_lr_lambda(lr_lambda_name, OPTIMIZER_CONFIG.get("scheduler_" + lr_lambda_name, dict()), END_EPOCH)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch=START_EPOCH-1)
     if FROM_CHECKPOINT:
@@ -159,7 +159,7 @@ def train():
         print(f"Training losses: {train_losses}")
         print(f"Validation losses: {val_losses}")
         print(f"lr: {scheduler.get_last_lr()}")
-        print("-" * 40)
+        print("-" * 80)
         
 if __name__ == '__main__':
     load_config(sys.argv[1])
