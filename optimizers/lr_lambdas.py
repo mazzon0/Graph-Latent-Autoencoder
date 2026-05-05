@@ -13,11 +13,20 @@ def get_lr_lambda(name: str, config: dict, end_epoch: int):
 
     END_EPOCH = end_epoch if end_epoch >= 0 else 0
 
+    print("LR Scheduler: ", end="")
     match(name):
-        case "constant": return lr_lambda_constant
-        case "exponential": return lr_lambda_exponential
-        case "cosine": return lr_lambda_cosine
-        case "cosine_with_warmup": return lr_lambda_cosine_with_warmup
+        case "constant":
+            print("constant")
+            return lr_lambda_constant
+        case "exponential":
+            print("exponential")
+            return lr_lambda_exponential
+        case "cosine":
+            print("cosine")
+            return lr_lambda_cosine
+        case "cosine_with_warmup":
+            print("cosine_with_warmup")
+            return lr_lambda_cosine_with_warmup
 
 def lr_lambda_constant(epoch):
     return 1.0

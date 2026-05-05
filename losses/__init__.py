@@ -5,22 +5,31 @@ from .reconstruction_loss import SSIMLoss
 
 def get_loss(config: dict):
 
+    print("Reconstruction Loss: ", end="")
     match config.get('reconstruction', "mse"):
         case 'mse':
+            print("mse")
             reconstruction_loss = nn.MSELoss()
         case 'ssim':
+            print("ssim")
             reconstruction_loss = SSIMLoss()
 
+    print("Nodes Regularizer: ", end="")
     match config.get('nodes', "probs"):
         case 'probs':
+            print("probs")
             nodes_reg = ProbabilityRegularizer()
         case 'discr':
+            print("discr")
             nodes_reg = DiscreteRegularizer(0.5)
 
+    print("Edges Regularizer: ", end="")
     match config.get('edges', "probs"):
         case 'probs':
+            print("probs")
             edges_reg = ProbabilityRegularizer()
         case 'discr':
+            print("discr")
             edges_reg = DiscreteRegularizer(0.5)
 
     alpha = config.get('alpha', 1.0)

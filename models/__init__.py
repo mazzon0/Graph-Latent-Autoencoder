@@ -5,7 +5,10 @@ def get_model(name: str, config: dict):
     channels = config.get('channels', [3, 8, 16, 32])
     mlp_sizes = config.get('mlp_sizes', [2048, 1024, 512])
 
+    print("Model: ", end="")
     match(name):
-        case 'cnn': return CnnAutoencoder(image_shape, channels, mlp_sizes)
+        case 'cnn':
+            print("cnn")
+            return CnnAutoencoder(image_shape, channels, mlp_sizes)
 
     return None

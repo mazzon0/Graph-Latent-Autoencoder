@@ -10,8 +10,13 @@ def get_optimizer(model: torch.nn.Module, name: str, config: dict):
     WEIGHT_DECAY = float(config.get('weight_decay', WEIGHT_DECAY))
     MOMENTUM = float(config.get('momentum', MOMENTUM))
 
+    print("Optimizer: ", end="")
     match(name):
-        case "adamw": return torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-        case "sgd":   return torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
+        case "adamw":
+            print("adamw")
+            return torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+        case "sgd":
+            print("sgd")
+            return torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
 
     return None

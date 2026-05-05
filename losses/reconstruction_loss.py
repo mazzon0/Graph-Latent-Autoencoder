@@ -7,4 +7,4 @@ class SSIMLoss(nn.Module):
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
 
     def forward(self, outputs, targets):
-        return self.ssim(outputs, targets)
+        return (1 - self.ssim(outputs, targets)) / 2

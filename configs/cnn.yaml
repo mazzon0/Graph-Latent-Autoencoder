@@ -1,7 +1,7 @@
 model: "cnn"
 optimizer: "adamw"
 start_epoch: 0
-end_epoch: 9
+end_epoch: 29
 from_checkpoint: false
 checkpoint_file: ""
 batch_size: 256
@@ -12,10 +12,11 @@ model_cnn:
   mlp_sizes: [2048, 1024, 512, 256]
 
 optimizer_adamw:
-  lr: 1e-5
+  lr: 1e-4
   weight_decay: 0.05
-  scheduler: "constant"
-
+  scheduler: "exponential"
+  decay_rate: 0.1
+  
 loss:
   reconstruction: "ssim"
   nodes: "probs"
