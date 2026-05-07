@@ -1,9 +1,9 @@
 model: "cnn"
 optimizer: "adamw"
-start_epoch: 0
+start_epoch: 1
 end_epoch: 29
-from_checkpoint: false
-checkpoint_file: ""
+from_checkpoint: true
+checkpoint_file: "last.pth"
 batch_size: 256
 
 model_cnn:
@@ -18,6 +18,6 @@ optimizer_adamw:
   decay_rate: 0.1
   
 loss:
-  reconstruction: "ssim"
+  reconstruction: "mse"
   nodes: "probs"
   edges: "probs"

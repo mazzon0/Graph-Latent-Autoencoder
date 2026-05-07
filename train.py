@@ -87,10 +87,12 @@ def train():
     model = get_model(MODEL, MODEL_CONFIG).to(device)
     loss_fn = get_loss(LOSS).to(device)
     optimizer = get_optimizer(model, OPTIMIZER, OPTIMIZER_CONFIG)
+    best_loss = float('inf')
     if FROM_CHECKPOINT:
         loaded_data = torch.load(CHECKPOINT_FILE, map_location=device)
         model.load_state_dict(loaded_data['model_state_dict'], strict=True)
         optimizer.load_state_dict(loaded_data['optimizer_state_dict'])
+        best_loss = float(loaded_data.get('loss', float('inf')))
     
     lr_lambda_name = OPTIMIZER_CONFIG.get('scheduler', "constant")
     lr_lambda = get_lr_lambda(lr_lambda_name, OPTIMIZER_CONFIG.get("scheduler_" + lr_lambda_name, dict()), END_EPOCH)
@@ -99,7 +101,6 @@ def train():
         scheduler.load_state_dict(loaded_data['scheduler_state_dict'])
     
     # Training loop
-    best_loss = float('inf')
     for epoch in range(START_EPOCH, END_EPOCH + 1):
         # Train
         model.train()
