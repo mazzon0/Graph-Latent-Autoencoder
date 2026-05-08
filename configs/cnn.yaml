@@ -1,9 +1,9 @@
 model: "cnn"
 optimizer: "adamw"
 dataset: "coco"
-start_epoch: 10
+start_epoch: 0
 end_epoch: 29
-from_checkpoint: true
+from_checkpoint: false
 checkpoint_file: "best.pth"
 batch_size: 256
 num_workers: 8
@@ -20,6 +20,6 @@ optimizer_adamw:
   decay_rate: 0.1
 
 loss:
-  reconstruction: "mse"
+  reconstruction: "mae"
   nodes: "probs"
   edges: "probs"

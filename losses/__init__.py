@@ -10,6 +10,9 @@ def get_loss(config: dict):
         case 'mse':
             print("mse")
             reconstruction_loss = nn.MSELoss()
+        case 'mae':
+            print("mae")
+            reconstruction_loss = nn.L1Loss()
         case 'ssim':
             print("ssim")
             reconstruction_loss = SSIMLoss()
