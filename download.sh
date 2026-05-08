@@ -4,12 +4,6 @@ BASE_DIR="data/datasets/coco"
 mkdir -p "$BASE_DIR/annotations"
 cd "$BASE_DIR" || exit
 
-# Download and Extract Annotations
-echo "--- Downloading COCO Annotations ---"
-wget -c http://images.cocodataset.org/annotations/annotations_trainval2017.zip
-unzip -j annotations_trainval2017.zip "annotations/instances_train2017.json" "annotations/instances_val2017.json" -d ./annotations/
-rm annotations_trainval2017.zip
-
 # Download and Extract Train 2017
 echo "--- Downloading Train 2017 Images ---"
 wget -c http://images.cocodataset.org/zips/train2017.zip
