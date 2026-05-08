@@ -8,7 +8,7 @@ import time
 from models import get_model
 from optimizers import get_lr_lambda, get_optimizer
 from losses import get_loss
-from datasets import CocoDataset
+from datasets import get_dataset
 
 START_EPOCH = 0
 END_EPOCH = 0
@@ -23,12 +23,13 @@ LOSS = None
 MODEL_CONFIG = None
 OPTIMIZER_CONFIG = None
 LOSS_CONFIG = None
+DATASET = None
 
 def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
         if config:
-            global START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, BATCH_SIZE, NUM_WORKERS, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG
+            global START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, BATCH_SIZE, NUM_WORKERS, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG, DATASET
             START_EPOCH = config.get('start_epoch', 0)
             END_EPOCH = config.get('end_epoch', 1)
             FROM_CHECKPOINT = config.get('from_checkpoint', False)
@@ -41,6 +42,7 @@ def load_config(filename: str):
             OPTIMIZER = config.get('optimizer', "adamw")
             OPTIMIZER_CONFIG = config.get('optimizer_' + OPTIMIZER, None)
             LOSS = config.get('loss', dict())
+            DATASET = config.get('dataset', "coco")
 
 def collate_autoencoder(batch):
     # only returns the images
@@ -71,15 +73,7 @@ def train():
     ])
 
     # Dataset
-    train_set = CocoDataset(
-        img_dir='data/datasets/coco/train2017',
-        transform=train_transform
-    )
-
-    val_set = CocoDataset(
-        img_dir='data/datasets/coco/val2017',
-        transform=val_transform
-    )
+    train_set, val_set = get_dataset(DATASET, train_transform, val_transform)
 
     train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=True, collate_fn=collate_autoencoder, prefetch_factor=4)
     val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, collate_fn=collate_autoencoder, prefetch_factor=4)
@@ -152,6 +146,7 @@ def train():
         }
         torch.save(checkpoint, "last.pth")
         if val_losses['loss'] < best_loss:
+            print("New best model")
             best_loss = val_losses['loss']
             torch.save(checkpoint, "best.pth")
 
