@@ -1,19 +1,21 @@
 import torch
 from torch.utils.data import DataLoader
-from torchvision.datasets import CocoDetection
 from torchvision.transforms import v2
 import yaml
 import sys
+import time
 
 from models import get_model
 from optimizers import get_lr_lambda, get_optimizer
 from losses import get_loss
+from datasets import CocoDataset
 
 START_EPOCH = 0
 END_EPOCH = 0
 FROM_CHECKPOINT = False
 CHECKPOINT_FILE = ''
 BATCH_SIZE = 1
+NUM_WORKERS = 1
 
 MODEL = None
 OPTIMIZER = None
@@ -26,12 +28,13 @@ def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
         if config:
-            global START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, BATCH_SIZE, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG
+            global START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, BATCH_SIZE, NUM_WORKERS, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG
             START_EPOCH = config.get('start_epoch', 0)
             END_EPOCH = config.get('end_epoch', 1)
             FROM_CHECKPOINT = config.get('from_checkpoint', False)
             CHECKPOINT_FILE = config.get('checkpoint_file', "")
             BATCH_SIZE = config.get('batch_size', 1)
+            NUM_WORKERS = config.get('num_workers', 1)
 
             MODEL = config.get('model', "cnn")
             MODEL_CONFIG = config.get('model_' + MODEL, None)
@@ -41,7 +44,7 @@ def load_config(filename: str):
 
 def collate_autoencoder(batch):
     # only returns the images
-    images = [item[0] for item in batch]
+    images = torch.stack([item[0] for item in batch])
     return images
 
 def train():
@@ -68,20 +71,18 @@ def train():
     ])
 
     # Dataset
-    train_set = CocoDetection(
-        root='data/datasets/coco/train2017',
-        annFile='data/datasets/coco/annotations/instances_train2017.json',
+    train_set = CocoDataset(
+        img_dir='data/datasets/coco/train2017',
         transform=train_transform
     )
 
-    val_set = CocoDetection(
-        root='data/datasets/coco/val2017',
-        annFile='data/datasets/coco/annotations/instances_val2017.json',
+    val_set = CocoDataset(
+        img_dir='data/datasets/coco/val2017',
         transform=val_transform
     )
 
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True, collate_fn=collate_autoencoder)
-    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, collate_fn=collate_autoencoder)
+    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=True, collate_fn=collate_autoencoder, prefetch_factor=4)
+    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, collate_fn=collate_autoencoder, prefetch_factor=4)
 
     # Initialize model, loss and optimizer
     model = get_model(MODEL, MODEL_CONFIG).to(device)
@@ -102,12 +103,14 @@ def train():
     
     # Training loop
     for epoch in range(START_EPOCH, END_EPOCH + 1):
+        start = time.time()
+
         # Train
         model.train()
         train_losses = {'loss': 0.0, 'reconstruction': 0.0, 'nodes': 0.0, 'edges': 0.0}
         
         for images in train_loader:
-            images = torch.stack(images).to(device)
+            images = images.to(device, non_blocking=True)
 
             with torch.amp.autocast('cuda'):
                 outputs = model(images)
@@ -118,10 +121,10 @@ def train():
             scaler.step(optimizer)
             scaler.update()
 
-            train_losses['loss'] += loss['loss']
-            train_losses['reconstruction'] += loss['reconstruction']
-            train_losses['edges'] += loss['edges']
-            train_losses['nodes'] += loss['nodes']
+            train_losses['loss'] += loss['loss'].item()
+            train_losses['reconstruction'] += loss['reconstruction'].item()
+            train_losses['edges'] += loss['edges'].item()
+            train_losses['nodes'] += loss['nodes'].item()
 
         # Validation
         model.eval()
@@ -129,15 +132,15 @@ def train():
 
         with torch.no_grad():
             for images in val_loader:
-                images = torch.stack(images).to(device)
+                images = images.to(device, non_blocking=True)
                 
                 outputs = model(images)
                 loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images)
                 
-                val_losses['loss'] += loss['loss']
-                val_losses['reconstruction'] += loss['reconstruction']
-                val_losses['edges'] += loss['edges']
-                val_losses['nodes'] += loss['nodes']
+                val_losses['loss'] += loss['loss'].item()
+                val_losses['reconstruction'] += loss['reconstruction'].item()
+                val_losses['edges'] += loss['edges'].item()
+                val_losses['nodes'] += loss['nodes'].item()
         
         # Save best and last model
         checkpoint = {
@@ -156,7 +159,7 @@ def train():
 
         train_losses = {k: v / len(train_loader) for k, v in train_losses.items()}
         val_losses = {k: v / len(val_loader) for k, v in val_losses.items()}
-        print(f"Epoch {epoch}/{END_EPOCH}")
+        print(f"Epoch {epoch}/{END_EPOCH}  -  {time.time() - start:.2f} seconds")
         print(f"Training losses: {train_losses}")
         print(f"Validation losses: {val_losses}")
         print(f"lr: {scheduler.get_last_lr()}")
