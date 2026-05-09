@@ -16,6 +16,9 @@ def get_loss(config: dict):
         case 'ssim':
             print("ssim")
             reconstruction_loss = SSIMLoss()
+        case 'bce':
+            print("bce")
+            reconstruction_loss = nn.BCEWithLogitsLoss()
 
     print("Nodes Regularizer: ", end="")
     match config.get('nodes', "probs"):
