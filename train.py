@@ -96,6 +96,8 @@ def train():
         scheduler.load_state_dict(loaded_data['scheduler_state_dict'])
     
     # Training loop
+    num_batches = len(train_loader)
+    grad_norms = torch.zeros(num_batches)
     for epoch in range(START_EPOCH, END_EPOCH + 1):
         start = time.time()
 
@@ -103,7 +105,7 @@ def train():
         model.train()
         train_losses = {'loss': 0.0, 'reconstruction': 0.0, 'nodes': 0.0, 'edges': 0.0}
         
-        for images in train_loader:
+        for i, images in enumerate(train_loader):
             images = images.to(device, non_blocking=True)
 
             with torch.amp.autocast('cuda'):
@@ -112,6 +114,7 @@ def train():
 
             optimizer.zero_grad()
             scaler.scale(loss['loss']).backward()
+            grad_norms[i] = model.get_first_layer().weight.grad.norm()
             scaler.step(optimizer)
             scaler.update()
 
@@ -119,6 +122,10 @@ def train():
             train_losses['reconstruction'] += loss['reconstruction'].item()
             train_losses['edges'] += loss['edges'].item()
             train_losses['nodes'] += loss['nodes'].item()
+
+        avg_norm = torch.mean(grad_norms).item()
+        std_norm = torch.std(grad_norms).item()
+        median_norm = torch.median(grad_norms).item()
 
         # Validation
         model.eval()
@@ -155,6 +162,7 @@ def train():
         train_losses = {k: v / len(train_loader) for k, v in train_losses.items()}
         val_losses = {k: v / len(val_loader) for k, v in val_losses.items()}
         print(f"Epoch {epoch}/{END_EPOCH}  -  {time.time() - start:.2f} seconds")
+        print(f"First Layer Grad Norms: median = {median_norm:.4f}, mean = {avg_norm:.4f}, std = {std_norm:.4f}")
         print(f"Training losses: {train_losses}")
         print(f"Validation losses: {val_losses}")
         print(f"lr: {scheduler.get_last_lr()}")

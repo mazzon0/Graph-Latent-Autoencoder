@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .base_autoencoder import BaseAutoencoder
 
-class CnnAutoencoder(nn.Module):
+class CnnAutoencoder(BaseAutoencoder):
     """
     A Deep Convolutional Autoencoder with a fully-connected MLP bottleneck.
     """
@@ -93,3 +94,6 @@ class CnnAutoencoder(nn.Module):
             'nodes': torch.zeros(1, dtype=torch.float32, device=x.device),
             'edges': torch.zeros(1, dtype=torch.float32, device=x.device)
         }
+    
+    def get_first_layer(self):
+        return self.cnn_encoder[0]
