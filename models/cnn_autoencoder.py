@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from .base_autoencoder import BaseAutoencoder
+from .weight_init import init_weights_kaiming
 
 class CnnAutoencoder(BaseAutoencoder):
     """
@@ -66,6 +66,8 @@ class CnnAutoencoder(BaseAutoencoder):
             if i != 1:  # every layer has a Leaky ReLU activation, but the last one sigmoid activation for normalized values (0, 1)
                 self.cnn_decoder.add_module(f"dec_tconv_bn_{i}", nn.BatchNorm2d(channels[i-1]))
                 self.cnn_decoder.add_module(f"dec_tconv_act_{i}", nn.LeakyReLU())
+
+        self.apply(init_weights_kaiming)
             
     def forward(self, x: torch.Tensor):
         """
@@ -96,4 +98,5 @@ class CnnAutoencoder(BaseAutoencoder):
         }
     
     def get_first_layer(self):
+        """Returns the first layer of the CNN encoder"""
         return self.cnn_encoder[0]
