@@ -5,21 +5,23 @@ start_epoch: 0
 end_epoch: 29
 from_checkpoint: false
 checkpoint_file: "best.pth"
-batch_size: 256
+batch_size: 128
 num_workers: 8
 
 model_cnn:
   image_shape: [3, 64, 64]
-  channels: [3, 8, 16, 32]
+  channels: [3, 16, 24, 32]
   mlp_sizes: [2048, 1024, 512, 256]
+  train_with_sigmoid: false
 
 optimizer_adamw:
   lr: 1e-4
   weight_decay: 0.05
-  scheduler: "exponential"
-  decay_rate: 0.1
+  scheduler: "cosine_with_warmup"
+  scheduler_cosine_with_warmup:
+    warmup_epochs: 7
 
 loss:
-  reconstruction: "mae"
+  reconstruction: "bce"
   nodes: "probs"
   edges: "probs"
