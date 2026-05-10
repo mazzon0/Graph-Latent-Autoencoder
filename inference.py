@@ -55,13 +55,9 @@ def inference(image_path: str):
         output = model(image)
         loss = loss_fn(output['image'], output['nodes'], output['edges'], image)
 
-        output = model(image)
-        reconstructed_image = output['image']
-        loss = loss_fn(reconstructed_image, output['nodes'], output['edges'], image)
-
     # Result
     OUTPUT_PATH = 'result.png'
-    comparison = torch.cat([image, reconstructed_image], dim=3)
+    comparison = torch.cat([image, output['image']], dim=3)
     save_image(comparison, OUTPUT_PATH)
     
     print(f"Result saved in '{OUTPUT_PATH}'")
