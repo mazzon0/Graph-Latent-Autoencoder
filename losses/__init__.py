@@ -1,24 +1,28 @@
-import torch.nn as nn
 from .graph_latent_autoencoder_loss import GraphLatentAutoencoderLoss
 from .gating_regularizers import ProbabilityRegularizer, DiscreteRegularizer
-from .reconstruction_loss import SSIMLoss
+from .reconstruction_loss import L1Loss, L2Loss, BCELoss, SSIMLoss, HybridLoss
 
 def get_loss(config: dict):
+    recon_name = config.get('reconstruction', "mse")
+    recon_config = config.get('reconstruction_' + recon_name, dict())
 
     print("Reconstruction Loss: ", end="")
     match config.get('reconstruction', "mse"):
-        case 'mse':
-            print("mse")
-            reconstruction_loss = nn.MSELoss()
-        case 'mae':
-            print("mae")
-            reconstruction_loss = nn.L1Loss()
+        case 'mse' | 'l2':
+            print("l2")
+            reconstruction_loss = L2Loss(recon_config)
+        case 'mae' | 'l1':
+            print("l1")
+            reconstruction_loss = L1Loss(recon_config)
         case 'ssim':
             print("ssim")
-            reconstruction_loss = SSIMLoss()
+            reconstruction_loss = SSIMLoss(recon_config)
         case 'bce':
             print("bce")
-            reconstruction_loss = nn.BCEWithLogitsLoss()
+            reconstruction_loss = BCELoss(recon_config)
+        case 'hybrid':
+            print("hybrid")
+            reconstruction_loss = HybridLoss(recon_config)
 
     print("Nodes Regularizer: ", end="")
     match config.get('nodes', "probs"):

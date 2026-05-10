@@ -11,15 +11,15 @@ class GraphLatentAutoencoderLoss(nn.Module):
         self.beta = beta
         self.gamma = gamma
 
-    def forward(self, outputs, node_probs, edge_probs, targets):
-        nodes = self.nodes_loss(node_probs)
-        edges = self.edges_loss(edge_probs)
-        reconstruction = self.reconstruction_loss(outputs, targets)
-        loss = self.alpha * reconstruction + self.beta * nodes + self.gamma * edges
+    def forward(self, outputs, node_probs, edge_probs, targets, epoch):
+        losses = dict()
+        losses['nodes'] = self.nodes_loss(node_probs)
+        losses['edges'] = self.edges_loss(edge_probs)
 
-        return {
-            'loss': loss,
-            'reconstruction': reconstruction,
-            'nodes': nodes,
-            'edges': edges
-        }
+        for key, loss in self.reconstruction_loss(outputs, targets, epoch).items():
+            losses[key] = loss
+
+        loss = self.alpha * losses['reconstruction'] + self.beta * losses['nodes'] + self.gamma * losses['edges']
+        losses['loss'] = loss
+
+        return losses

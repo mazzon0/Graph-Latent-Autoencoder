@@ -101,23 +101,24 @@ def train():
 
         # Train
         model.train()
-        train_losses = {'loss': 0.0, 'reconstruction': 0.0, 'nodes': 0.0, 'edges': 0.0}
+        train_losses = dict()
         
         for i, images in enumerate(train_loader):
             images = images.to(device, non_blocking=True)
 
             outputs = model(images)
-            loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images)
+            loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images, epoch)
 
             optimizer.zero_grad()
             loss['loss'].backward()
             grad_norms[i] = model.get_first_layer().weight.grad.norm()
             optimizer.step()
 
-            train_losses['loss'] += loss['loss'].item()
-            train_losses['reconstruction'] += loss['reconstruction'].item()
-            train_losses['edges'] += loss['edges'].item()
-            train_losses['nodes'] += loss['nodes'].item()
+            for key, loss in loss.items():
+                if key in train_losses:
+                    train_losses[key] += loss.item()
+                else:
+                    train_losses[key] = loss.item()
 
         avg_norm = torch.mean(grad_norms).item()
         std_norm = torch.std(grad_norms).item()
@@ -125,18 +126,19 @@ def train():
 
         # Validation
         model.eval()
-        val_losses = {'loss': 0.0, 'reconstruction': 0.0, 'nodes': 0.0, 'edges': 0.0}
+        val_losses = dict()
 
         for images in val_loader:
             images = images.to(device, non_blocking=True)
             
             outputs = model(images)
-            loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images)
+            loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images, epoch)
             
-            val_losses['loss'] += loss['loss'].item()
-            val_losses['reconstruction'] += loss['reconstruction'].item()
-            val_losses['edges'] += loss['edges'].item()
-            val_losses['nodes'] += loss['nodes'].item()
+            for key, loss in loss.items():
+                if key in val_losses:
+                    val_losses[key] += loss.item()
+                else:
+                    val_losses[key] = loss.item()
         
         # Save best and last model
         checkpoint = {
@@ -144,7 +146,7 @@ def train():
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict(),
-            'loss': val_losses['loss'].item()
+            'loss': val_losses['loss']
         }
         torch.save(checkpoint, "last.pth")
         if val_losses['loss'] < best_loss:

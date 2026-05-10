@@ -10,18 +10,24 @@ num_workers: 8
 
 model_cnn:
   image_shape: [3, 64, 64]
-  channels: [3, 16, 24, 32]
-  mlp_sizes: [2048, 1024, 512, 256]
-  train_with_sigmoid: false
+  channels: [3, 64, 128, 256]
+  mlp_sizes: [16384, 2048, 1024]
+  train_with_sigmoid: true
 
 optimizer_adamw:
   lr: 1e-4
-  weight_decay: 0.05
+  weight_decay: 0.0
   scheduler: "cosine_with_warmup"
   scheduler_cosine_with_warmup:
-    warmup_epochs: 7
+    warmup_epochs: 5
 
 loss:
-  reconstruction: "bce"
+  reconstruction: "hybrid"
   nodes: "probs"
   edges: "probs"
+  reconstruction_hybrid:
+    start_epoch: 0
+    end_epoch: 15
+    start_val: 0.2
+    end_val: 0.8
+    func: "linear"
