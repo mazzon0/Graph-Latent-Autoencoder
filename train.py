@@ -53,8 +53,6 @@ def train():
     if torch.cuda.is_available():   print("Training on CUDA GPU")
     else:                           print("Training on CPU")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    scaler = torch.amp.GradScaler('cuda')
-    torch.multiprocessing.set_sharing_strategy('file_descriptor')
 
     # Data Preprocessing
     train_transform = v2.Compose([
@@ -108,15 +106,13 @@ def train():
         for i, images in enumerate(train_loader):
             images = images.to(device, non_blocking=True)
 
-            with torch.amp.autocast('cuda'):
-                outputs = model(images)
-                loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images)
+            outputs = model(images)
+            loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images)
 
             optimizer.zero_grad()
-            scaler.scale(loss['loss']).backward()
+            loss['loss'].backward()
             grad_norms[i] = model.get_first_layer().weight.grad.norm()
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
 
             train_losses['loss'] += loss['loss'].item()
             train_losses['reconstruction'] += loss['reconstruction'].item()
@@ -131,17 +127,16 @@ def train():
         model.eval()
         val_losses = {'loss': 0.0, 'reconstruction': 0.0, 'nodes': 0.0, 'edges': 0.0}
 
-        with torch.no_grad():
-            for images in val_loader:
-                images = images.to(device, non_blocking=True)
-                
-                outputs = model(images)
-                loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images)
-                
-                val_losses['loss'] += loss['loss'].item()
-                val_losses['reconstruction'] += loss['reconstruction'].item()
-                val_losses['edges'] += loss['edges'].item()
-                val_losses['nodes'] += loss['nodes'].item()
+        for images in val_loader:
+            images = images.to(device, non_blocking=True)
+            
+            outputs = model(images)
+            loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images)
+            
+            val_losses['loss'] += loss['loss'].item()
+            val_losses['reconstruction'] += loss['reconstruction'].item()
+            val_losses['edges'] += loss['edges'].item()
+            val_losses['nodes'] += loss['nodes'].item()
         
         # Save best and last model
         checkpoint = {
@@ -149,7 +144,7 @@ def train():
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict(),
-            'loss': val_losses['loss']
+            'loss': val_losses['loss'].item()
         }
         torch.save(checkpoint, "last.pth")
         if val_losses['loss'] < best_loss:
