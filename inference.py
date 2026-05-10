@@ -10,6 +10,7 @@ from losses import get_loss
 
 FROM_CHECKPOINT = True
 CHECKPOINT_FILE = ''
+END_EPOCH = 0
 
 MODEL = None
 LOSS = None
@@ -19,7 +20,8 @@ def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
         if config:
-            global CHECKPOINT_FILE, MODEL, LOSS, MODEL_CONFIG, LOSS_CONFIG
+            global CHECKPOINT_FILE, MODEL, LOSS, MODEL_CONFIG, LOSS_CONFIG, END_EPOCH
+            END_EPOCH = config.get('end_epoch', END_EPOCH)
             CHECKPOINT_FILE = config.get('checkpoint_file', "")
             MODEL = config.get('model', "cnn")
             MODEL_CONFIG = config.get('model_' + MODEL, None)
@@ -53,7 +55,7 @@ def inference(image_path: str):
     model.eval()
     with torch.no_grad():
         output = model(image)
-        loss = loss_fn(output['image'], output['nodes'], output['edges'], image)
+        loss = loss_fn(output['image'], output['nodes'], output['edges'], image, END_EPOCH)
 
     # Result
     OUTPUT_PATH = 'result.png'
