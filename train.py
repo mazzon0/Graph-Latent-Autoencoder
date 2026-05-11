@@ -25,6 +25,8 @@ OPTIMIZER_CONFIG = None
 LOSS_CONFIG = None
 DATASET = None
 
+torch.manual_seed(0)
+
 def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
