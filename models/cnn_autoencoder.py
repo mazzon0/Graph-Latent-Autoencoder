@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from .base_autoencoder import BaseAutoencoder
-from .weight_init import init_weights_kaiming
 
 class CnnAutoencoder(BaseAutoencoder):
     """
@@ -67,8 +66,23 @@ class CnnAutoencoder(BaseAutoencoder):
                 self.cnn_decoder.add_module(f"dec_tconv_bn_{i}", nn.BatchNorm2d(channels[i-1]))
                 self.cnn_decoder.add_module(f"dec_tconv_act_{i}", nn.LeakyReLU())
 
-        self.apply(init_weights_kaiming)
-            
+        self._init_weights()
+
+    def _init_weights(self):
+        """
+        Initializes weights using Xavier uniform initialization.
+        """
+        for p in self.parameters():
+            if isinstance(p, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+                nn.init.kaiming_normal_(p.weight, a=0.01, mode='fan_out', nonlinearity='leaky_relu')
+                
+                if p.bias is not None:
+                    nn.init.constant_(p.bias, 0)
+                    
+            elif isinstance(p, (nn.BatchNorm2d, nn.BatchNorm1d)):
+                nn.init.constant_(p.weight, 1)
+                nn.init.constant_(p.bias, 0)
+
     def forward(self, x: torch.Tensor):
         """
         Passes the input through the full autoencoder pipeline.
