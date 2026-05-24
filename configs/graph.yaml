@@ -1,0 +1,45 @@
+model: "graph"
+optimizer: "adamw"
+dataset: "coco"
+start_epoch: 0
+end_epoch: 59
+from_checkpoint: false
+checkpoint_file: "best.pth"
+batch_size: 4
+num_workers: 8
+
+model_graph:
+  image_shape: [3, 64, 64]
+  channels: [3, 64, 72, 128]
+  d_model: 128
+  nhead: 8
+  num_encoder_layers: 6
+  num_decoder_layers: 6
+  dim_ff: 256
+  dropout: 0.1
+  activation: "relu"
+  max_seq_len: 5000
+  num_queries: 64
+  d_node: 64
+  d_edge: 64
+  d_global: 64
+  gnn_layers: 4
+  train_with_sigmoid: true
+
+optimizer_adamw:
+  lr: 1e-4
+  weight_decay: 0.0
+  scheduler: "cosine_with_warmup"
+  scheduler_cosine_with_warmup:
+    warmup_epochs: 5
+
+loss:
+  reconstruction: "hybrid"
+  nodes: "probs"
+  edges: "probs"
+  reconstruction_hybrid:
+    start_epoch: 0
+    end_epoch: 15
+    start_val: 0.2
+    end_val: 0.5
+    func: "linear"
