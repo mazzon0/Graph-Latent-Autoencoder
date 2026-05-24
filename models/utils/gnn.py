@@ -25,7 +25,7 @@ class AttentionGraphBlock(nn.Module):
             nn.LeakyReLU()
         )
         self.edge_update = nn.Sequential(
-            nn.Linear(d_edge + d_node * 2, d_edge),
+            nn.Linear(d_edge + d_node * 2 + d_global, d_edge),
             nn.LayerNorm(d_edge),
             nn.LeakyReLU()
         )
@@ -62,7 +62,9 @@ class AttentionGraphBlock(nn.Module):
         # Update Edges based on the new node representations
         nodes_i = new_nodes.unsqueeze(2).expand(B, N, N, -1)
         nodes_j = new_nodes.unsqueeze(1).expand(B, N, N, -1)
-        edge_inputs = torch.cat([edges, nodes_i, nodes_j], dim=-1)
+        # (B, d_global) -> (B, 1, 1, d_global) -> (B, N, N, d_global)
+        global_expanded = global_attr.unsqueeze(1).unsqueeze(2).expand(B, N, N, self.d_global)
+        edge_inputs = torch.cat([edges, nodes_i, nodes_j, global_expanded], dim=-1)
         new_edges = self.edge_update(edge_inputs)
 
         # TODO Update Global Embedding
