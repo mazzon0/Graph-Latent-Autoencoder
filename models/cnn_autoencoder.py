@@ -72,16 +72,15 @@ class CnnAutoencoder(BaseAutoencoder):
         """
         Initializes weights using Xavier uniform initialization.
         """
-        for p in self.parameters():
-            if isinstance(p, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
-                nn.init.kaiming_normal_(p.weight, a=0.01, mode='fan_out', nonlinearity='leaky_relu')
-                
-                if p.bias is not None:
-                    nn.init.constant_(p.bias, 0)
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+                nn.init.kaiming_normal_(m.weight, a=0.01, mode='fan_out', nonlinearity='leaky_relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
                     
-            elif isinstance(p, (nn.BatchNorm2d, nn.BatchNorm1d)):
-                nn.init.constant_(p.weight, 1)
-                nn.init.constant_(p.bias, 0)
+            elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, x: torch.Tensor):
         """
@@ -108,7 +107,8 @@ class CnnAutoencoder(BaseAutoencoder):
         return {
             'image': x,
             'nodes': torch.zeros(1, dtype=torch.float32, device=x.device),
-            'edges': torch.zeros(1, dtype=torch.float32, device=x.device)
+            'edges': torch.zeros(1, dtype=torch.float32, device=x.device),
+            'global': torch.zeros(1, dtype=torch.float32, device=x.device)
         }
     
     def get_first_layer(self):
