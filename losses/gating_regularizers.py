@@ -5,7 +5,8 @@ class ProbabilityRegularizer(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, probs: torch.Tensor):
+    def forward(self, items: torch.Tensor):
+        probs = items[:,:,:-1]
         return probs.sum()
     
 class DiscreteRegularizer(nn.Module):
@@ -13,5 +14,6 @@ class DiscreteRegularizer(nn.Module):
         super().__init__()
         self.threshold = threshold
 
-    def forward(self, decisions: torch.Tensor):
-        return (decisions > self.threshold).sum()
+    def forward(self, items: torch.Tensor):
+        probs = items[:,:,:-1]
+        return (probs > self.threshold).sum()

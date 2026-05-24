@@ -156,7 +156,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         # Apply confidence scores
         node_features = nodes[..., :-1]               # (B, N, d_node)
         node_conf = torch.sigmoid(nodes[..., -1:])    # (B, N, 1)
-        nodes_out = node_features * node_conf          
+        nodes_out = node_features * node_conf
         
         edge_features = edges[..., :-1]               # (B, N, N, d_edge)
         edge_conf = torch.sigmoid(edges[..., -1:])    # (B, N, N, 1)
@@ -175,8 +175,8 @@ class GraphLatentAutoencoder(BaseAutoencoder):
 
         return {
             'image': reconstructed_image,
-            'nodes': nodes_out,
-            'edges': edges_out,
+            'nodes': nodes,
+            'edges': edges,
             'global': global_out
         }
     
