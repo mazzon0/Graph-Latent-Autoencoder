@@ -55,7 +55,7 @@ def inference(image_path: str):
     model.eval()
     with torch.no_grad():
         output = model(image)
-        loss = loss_fn(output['image'], output['nodes'], output['edges'], image, END_EPOCH)
+        loss_dict = loss_fn(output, image, END_EPOCH)
 
     # Result
     OUTPUT_PATH = 'result.png'
@@ -63,7 +63,12 @@ def inference(image_path: str):
     save_image(comparison, OUTPUT_PATH)
     
     print(f"Result saved in '{OUTPUT_PATH}'")
-    print(f"Loss: {loss}")
+    
+    print(f"Total Loss: {loss_dict['loss'].item():.4f}")
+    print("Loss breakdown:")
+    for key, val in loss_dict.items():
+        if key != 'loss':
+            print(f"  - {key}: {val.item():.4f}")
         
 if __name__ == '__main__':
     # Usage: python3 inference.py configs/config.yaml data/some_image.jpg

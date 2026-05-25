@@ -97,7 +97,7 @@ def train():
     
     # Training loop
     num_batches = len(train_loader)
-    grad_norms = torch.zeros(num_batches)
+    grad_norms = torch.zeros(num_batches, device=device)
     for epoch in range(START_EPOCH, END_EPOCH + 1):
         start = time.time()
 
@@ -105,44 +105,51 @@ def train():
         model.train()
         train_losses = dict()
         
-        for i, images in enumerate(train_loader):
+        for i, batch in enumerate(train_loader):
+            images = batch[0] if isinstance(batch, (list, tuple)) else batch
             images = images.to(device, non_blocking=True)
 
             outputs = model(images)
-            loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images, epoch)
+            
+            loss = loss_fn(outputs, images, epoch)
 
             optimizer.zero_grad()
             loss['loss'].backward()
             grad_norms[i] = model.get_first_layer().weight.grad.norm()
             optimizer.step()
 
-            for key, loss in loss.items():
+            for key, l in loss.items():
                 if key in train_losses:
-                    train_losses[key] += loss.item()
+                    train_losses[key] += l.detach()
                 else:
-                    train_losses[key] = loss.item()
+                    train_losses[key] = l.detach()
 
         avg_norm = torch.mean(grad_norms).item()
         std_norm = torch.std(grad_norms).item()
         median_norm = torch.median(grad_norms).item()
+        
+        train_losses = {k: v.item() / num_batches for k, v in train_losses.items()}
 
         # Validation
         model.eval()
         val_losses = dict()
 
-        for images in val_loader:
-            images = images.to(device, non_blocking=True)
-            
-            outputs = model(images)
-            loss = loss_fn(outputs['image'], outputs['nodes'], outputs['edges'], images, epoch)
-            
-            for key, loss in loss.items():
-                if key in val_losses:
-                    val_losses[key] += loss.item()
-                else:
-                    val_losses[key] = loss.item()
-        
-        # Save best and last model
+        with torch.no_grad():
+            for batch in val_loader:
+                images = batch[0] if isinstance(batch, (list, tuple)) else batch
+                images = images.to(device, non_blocking=True)
+                
+                outputs = model(images)
+                loss = loss_fn(outputs, images, epoch)
+                
+                for key, l in loss.items():
+                    if key in val_losses:
+                        val_losses[key] += l.detach()
+                    else:
+                        val_losses[key] = l.detach()
+                        
+        val_losses = {k: v.item() / len(val_loader) for k, v in val_losses.items()}
+
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
@@ -158,8 +165,6 @@ def train():
 
         scheduler.step()
 
-        train_losses = {k: v / len(train_loader) for k, v in train_losses.items()}
-        val_losses = {k: v / len(val_loader) for k, v in val_losses.items()}
         print(f"Epoch {epoch}/{END_EPOCH}  -  {time.time() - start:.2f} seconds")
         print(f"First Layer Grad Norms: median = {median_norm:.4f}, mean = {avg_norm:.4f}, std = {std_norm:.4f}")
         print(f"Training losses: {train_losses}")

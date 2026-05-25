@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class GraphLatentAutoencoderLoss(nn.Module):
-    def __init__(self, reconstruction_loss: nn.Module, nodes_loss: torch.Tensor, edges_loss: torch.Tensor, alpha: float, beta: float, gamma: float):
+    def __init__(self, reconstruction_loss: nn.Module, nodes_loss: nn.Module, edges_loss: nn.Module, alpha: float, beta: float, gamma: float):
         super().__init__()
         self.reconstruction_loss = reconstruction_loss
         self.nodes_loss = nodes_loss
@@ -11,15 +11,14 @@ class GraphLatentAutoencoderLoss(nn.Module):
         self.beta = beta
         self.gamma = gamma
 
-    def forward(self, outputs, node_probs, edge_probs, targets, epoch):
+    def forward(self, outputs: dict, targets: torch.Tensor, epoch: int):
         losses = dict()
-        losses['nodes'] = self.nodes_loss(node_probs)
-        losses['edges'] = self.edges_loss(edge_probs)
+        losses['nodes'] = self.nodes_loss(outputs['node_conf'])
+        losses['edges'] = self.edges_loss(outputs['edge_conf'])
 
-        for key, loss in self.reconstruction_loss(outputs, targets, epoch).items():
+        for key, loss in self.reconstruction_loss(outputs['image'], targets, epoch).items():
             losses[key] = loss
 
         loss = self.alpha * losses['reconstruction'] + self.beta * losses['nodes'] + self.gamma * losses['edges']
         losses['loss'] = loss
-
         return losses

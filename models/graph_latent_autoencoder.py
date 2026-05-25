@@ -162,6 +162,14 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         edge_conf = torch.sigmoid(edges[..., -1:])    # (B, N, N, 1)
         edges_out = edge_features * edge_conf
 
+        node_features = nodes[..., :-1]               
+        node_conf = torch.sigmoid(nodes[..., -1:])    # (B, N, 1)
+        nodes_out = node_features * node_conf          
+        
+        edge_features = edges[..., :-1]               
+        edge_conf = torch.sigmoid(edges[..., -1:])    # (B, N, N, 1)
+        edges_out = edge_features * edge_conf
+
         # GNN
         gnn_nodes = nodes_out
         gnn_edges = edges_out
@@ -175,9 +183,11 @@ class GraphLatentAutoencoder(BaseAutoencoder):
 
         return {
             'image': reconstructed_image,
-            'nodes': nodes,
-            'edges': edges,
-            'global': global_out
+            'nodes': gnn_nodes,
+            'edges': gnn_edges,
+            'global': gnn_global,
+            'node_conf': node_conf,
+            'edge_conf': edge_conf
         }
     
     def get_first_layer(self):
