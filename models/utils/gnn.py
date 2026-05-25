@@ -9,6 +9,8 @@ class AttentionGraphBlock(nn.Module):
     def __init__(self, d_node: int, d_edge: int, d_global: int):
         super().__init__()
         self.d_node = d_node
+        self.d_edge = d_edge
+        self.d_global = d_global
 
         self.global_to_film = nn.Linear(d_global, d_node * 2)
         
@@ -72,7 +74,40 @@ class AttentionGraphBlock(nn.Module):
         return new_nodes, new_edges, global_attr
     
 
-class GraphToImageDecoder(nn.Module):
+class GraphToPixelDecoder(nn.Module):
+    """
+    Inner Model: Generates exactly 1 latent pixel feature array 
+    given the pooled graph context and a positional embedding.
+    """
+    def __init__(self, d_node: int, d_pos: int, init_channels: int):
+        super().__init__()
+        # Input features = Mean Node (d_node) + Max Node (d_node) + Pos Embedding (d_pos)
+        input_dim = (d_node * 2) + d_pos
+        
+        self.mlp = nn.Sequential(
+            nn.Linear(input_dim, 512),
+            nn.LayerNorm(512),
+            nn.LeakyReLU(),
+            
+            # Outputs the n-dimensional pixel feature array
+            nn.Linear(512, init_channels),
+            nn.LeakyReLU()
+        )
+
+    def forward(self, pooled_graph: torch.Tensor, pos_emb: torch.Tensor):
+        """
+        Args:
+            pooled_graph (torch.Tensor): Shape (B, ..., d_node * 2)
+            pos_emb (torch.Tensor): Shape (B, ..., d_pos)
+        Returns:
+            torch.Tensor: Shape (B, ..., init_channels) -> 1 Latent Pixel array
+        """
+        # Concatenate graph context and position information along the last dimension
+        x = torch.cat([pooled_graph, pos_emb], dim=-1)
+        return self.mlp(x)
+
+
+'''class GraphToImageDecoder(nn.Module):
     """
     Decodes a graph into an image by pooling node features, passing them 
     through an MLP to form a low-res grid, and upscaling via CNN.
@@ -128,6 +163,74 @@ class GraphToImageDecoder(nn.Module):
         low_res_image = flat_grid.view(B, self.init_channels, self.init_size, self.init_size)
         
         # CNN Upscaler
+        final_image = self.upscaler(low_res_image)
+
+        if not self.training or self.train_with_sigmoid:
+            final_image = torch.sigmoid(final_image)
+        
+        return final_image'''
+    
+
+class GraphToImageDecoder(nn.Module):
+    """
+    Wrapper Model: Stores positional embeddings, coordinates the Inner Model 
+    to generate a low-res latent grid, and upscales it to a final image.
+    """
+    def __init__(self, d_node: int, d_pos: int = 32, init_channels: int = 256, 
+                 init_size: int = 4, out_channels: int = 3, train_with_sigmoid: bool = True):
+        super().__init__()
+        self.init_channels = init_channels
+        self.init_size = init_size
+        self.train_with_sigmoid = train_with_sigmoid
+        
+        # Positional Embeddings
+        self.pos_embeddings = nn.Parameter(torch.randn(init_size, init_size, d_pos))
+        
+        # Inner Model
+        self.inner_model = GraphToPixelDecoder(d_node, d_pos, init_channels)
+        
+        # CNN Upscaler
+        self.upscaler = nn.Sequential(
+            # (Batch, 256, 4, 4) -> (Batch, 128, 8, 8)
+            nn.ConvTranspose2d(init_channels, 128, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(),
+            
+            # (Batch, 128, 8, 8) -> (Batch, 64, 16, 16)
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(),
+            
+            # (Batch, 64, 16, 16) -> (Batch, 32, 32, 32)
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
+
+            # (Batch, 32, 32, 32) -> (Batch, 3, 64, 64)
+            nn.ConvTranspose2d(32, out_channels, kernel_size=4, stride=2, padding=1)
+        )
+
+    def forward(self, nodes: torch.Tensor):
+        """
+        Args:
+            nodes (torch.Tensor): Shape (B, N, d_node)
+        """
+        B, N, D = nodes.shape
+        H_init, W_init = self.init_size, self.init_size
+        
+        mean_pool = nodes.mean(dim=1)           # (B, D)
+        max_pool = nodes.max(dim=1).values      # (B, D)
+        pooled_graph = torch.cat([mean_pool, max_pool], dim=-1)  # (B, D * 2)
+        graph_context = pooled_graph.unsqueeze(1).unsqueeze(2).expand(-1, H_init, W_init, -1)
+        pos_emb_expanded = self.pos_embeddings.unsqueeze(0).expand(B, -1, -1, -1)
+        
+        # (B, H_init, W_init, init_channels)
+        latent_grid = self.inner_model(graph_context, pos_emb_expanded)
+        
+        # (B, 4, 4, 256) -> (B, 256, 4, 4)
+        low_res_image = latent_grid.permute(0, 3, 1, 2)
+        
+        # Standard upscaling pass
         final_image = self.upscaler(low_res_image)
 
         if not self.training or self.train_with_sigmoid:
