@@ -116,6 +116,64 @@ model_cnn:
   train_with_sigmoid: true
 ```
 
+The **Graph Latent Autoencoder** can be customized adding the field `model_graph`.
+The model is composed of CNN -> DETR -> Graph Generation -> GNN -> CNN Upscaler.
+
+`image_shape` is the resolution of the images, represented as a list `[channels, height, width]`.
+
+`channels` allows to specify the number of channels for each intermediate representation of the CNN
+The number of layers of the CNN Encoder (and also CNN Decoder) is going to be `len(channels) - 1`.
+
+`d_model` is the dimensionality of the input and output representations (embedding dimension) within the Transformer layers.
+
+`nhead` is the number of attention heads in the multi-head attention mechanisms.
+
+`num_encoder_layers` is the number of transformer encoder layers.
+
+`num_decoder_layers` is the number of transformer decoder layers.
+
+`dim_ff` is the dimensionality of the feed-forward network (FFN) models within the transformer layers.
+
+`dropout` is the dropout probability applied to the transformer layers to prevent overfitting.
+
+`activation` is the activation function used in the feed-forward network layers (e.g., "relu", "gelu").
+
+`max_seq_len` is the maximum sequence length (or positional embedding limit) that the transformer can process.
+
+`num_queries` is the number of object queries (or learned positional embeddings) fed into the DETR decoder, defining the maximum number of graph nodes/elements the model can extract from image features.
+
+`d_node` is the feature dimension size for each node in the generated graph structure.
+
+`d_edge` is the feature dimension size for each edge in the generated graph structure.
+
+`d_global` is the feature dimension size for the global graph context vector (representing the graph properties as a whole).
+
+`gnn_layers` is the number of message-passing layer iterations within the Graph Neural Network (GNN) module.
+
+The output images have values in the range [0, 1], so a sigmoid activation function is added at the end.
+During training, for compatibility with the BCE loss, it is possible to return the actual logits,
+by setting `train_with_sigmoid` to `false` (the sigmoid is applied only at inference).
+
+```yaml
+model_graph:
+  image_shape: [3, 64, 64]
+  channels: [3, 64, 72, 128]
+  d_model: 128
+  nhead: 8
+  num_encoder_layers: 6
+  num_decoder_layers: 6
+  dim_ff: 256
+  dropout: 0.1
+  activation: "relu"
+  max_seq_len: 5000
+  num_queries: 64
+  d_node: 64
+  d_edge: 64
+  d_global: 64
+  gnn_layers: 4
+  train_with_sigmoid: true
+```
+
 ### Optimizers
 
 The **AdamW** optimizer can be configured by setting the learning rate `lr`, the `weight_decay` and the `scheduler`.
