@@ -4,8 +4,8 @@ dataset: "coco"
 start_epoch: 0
 end_epoch: 59
 from_checkpoint: false
-checkpoint_file: "best.pth"
-batch_size: 4
+checkpoint_file: "last.pth"
+batch_size: 64
 num_workers: 8
 
 model_graph:
@@ -37,9 +37,12 @@ loss:
   reconstruction: "hybrid"
   nodes: "probs"
   edges: "probs"
+  alpha: 1.0
+  beta: 0.0
+  gamma: 0.0
   reconstruction_hybrid:
     start_epoch: 0
     end_epoch: 15
-    start_val: 0.2
+    start_val: 0.0
     end_val: 0.5
     func: "linear"
