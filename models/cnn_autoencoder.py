@@ -108,7 +108,9 @@ class CnnAutoencoder(BaseAutoencoder):
             'image': x,
             'nodes': torch.zeros(1, dtype=torch.float32, device=x.device),
             'edges': torch.zeros(1, dtype=torch.float32, device=x.device),
-            'global': torch.zeros(1, dtype=torch.float32, device=x.device)
+            'global': torch.zeros(1, dtype=torch.float32, device=x.device),
+            'node_conf': torch.zeros(1, dtype=torch.float32, device=x.device),
+            'edge_conf': torch.zeros(1, dtype=torch.float32, device=x.device),
         }
     
     def get_first_layer(self):
