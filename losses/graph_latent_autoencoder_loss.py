@@ -24,7 +24,7 @@ class GraphLatentAutoencoderLoss(nn.Module):
         for key, loss in self.reconstruction_loss(outputs['image'], targets, epoch).items():
             losses[key] = loss
 
-        # Warmup scheduling: 0.0 for first 10 epochs, linearly scaling to 1.0 by epoch 20 TODO make this configurable
+        # Warmup scheduling
         if epoch < self.delay_epochs:
             warmup_factor = 0.0
         else:

@@ -45,5 +45,7 @@ def get_loss(config: dict):
     alpha = config.get('alpha', 1.0)
     beta  = config.get('beta', 1.0)
     gamma = config.get('gamma', 1.0)
+    delay_epochs = config.get('delay_epochs', 0)
+    ramp_epochs = config.get('ramp_epochs', 0)
 
-    return GraphLatentAutoencoderLoss(reconstruction_loss, nodes_reg, edges_reg, alpha, beta, gamma)
+    return GraphLatentAutoencoderLoss(reconstruction_loss, nodes_reg, edges_reg, alpha, beta, gamma, delay_epochs, ramp_epochs)

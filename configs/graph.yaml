@@ -40,6 +40,8 @@ loss:
   alpha: 1.0
   beta: 0.0
   gamma: 0.0
+  delay_epochs: 10
+  ramp_epochs: 10
   reconstruction_hybrid:
     start_epoch: 0
     end_epoch: 15
