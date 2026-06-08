@@ -1,6 +1,7 @@
 import sys
 import torch
 import streamlit as st
+import matplotlib.pyplot as plt
 from streamlit_agraph import agraph, Config
 from utils.graph_data import load_pytorch_data, create_ui_elements
 
@@ -25,12 +26,10 @@ if st.sidebar.button("💾 Save Changes to File", type="primary"):
 st.sidebar.divider()
 view_mode = st.sidebar.radio("View Mode", ["Page 1 (Scene Graph)", "Page 2 (Attention Maps)", "Side-by-Side"])
 
-
 def render_page_1():
     st.subheader("Scene Graph View")
     st.write("Click on a node to inspect and edit names.")
     
-    # Generate UI elements from current memory state
     nodes, edges = create_ui_elements(st.session_state.graph_data)
     graph_config = Config(width="100%", height=600, directed=True, physics=True, hierarchical=False)
     
@@ -38,6 +37,8 @@ def render_page_1():
     
     if clicked_node_id is not None:
         node_idx = int(clicked_node_id)
+        
+        st.session_state.active_node_idx = node_idx
         
         col_node, col_edge = st.columns(2)
         
@@ -57,7 +58,6 @@ def render_page_1():
             edge_indices = st.session_state.graph_data["edges"]["indices"]
             edge_names = st.session_state.graph_data["edges"]["names"]
             
-            # Find all edges attached to the clicked node
             connected_edges = [
                 e_idx for e_idx, (src, dst) in enumerate(edge_indices) 
                 if src.item() == node_idx or dst.item() == node_idx
@@ -77,8 +77,46 @@ def render_page_1():
 
 def render_page_2():
     st.subheader("Attention Map View")
-    st.success("attention map...")
-
+    
+    # Target Selection
+    target_type = st.radio(
+        "Select Attention Target:", 
+        ["Selected Node", "Global Token", "Relation Token"], 
+        horizontal=True
+    )
+    
+    num_layers = st.session_state.graph_data["metadata"]["num_layers"]
+    selected_layer = st.slider("Decoder Layer", min_value=1, max_value=num_layers, value=1)
+    layer_idx = selected_layer - 1 
+    
+    attn_map_tensor = None
+    
+    # Extract the correct tensor based on the user's choice
+    if target_type == "Selected Node":
+        if "active_node_idx" not in st.session_state:
+            st.info("👈 Please click a node in the Scene Graph first.")
+            return
+            
+        node_idx = st.session_state.active_node_idx
+        node_name = st.session_state.graph_data["nodes"]["names"][node_idx]
+        st.markdown(f"**Viewing Attention for:** `{node_name}`")
+        attn_map_tensor = st.session_state.graph_data["nodes"]["attention_maps"][node_idx, layer_idx]
+        
+    elif target_type == "Global Token":
+        st.markdown("**Viewing Attention for:** `Global Token`")
+        attn_map_tensor = st.session_state.graph_data["global_tokens"]["global_attention"][layer_idx]
+        
+    elif target_type == "Relation Token":
+        st.markdown("**Viewing Attention for:** `Relation Token`")
+        attn_map_tensor = st.session_state.graph_data["global_tokens"]["relation_attention"][layer_idx]
+    
+    # Render the heatmap
+    if attn_map_tensor is not None:
+        fig, ax = plt.subplots(figsize=(6, 6))
+        cax = ax.imshow(attn_map_tensor.numpy(), cmap='jet', interpolation='nearest')
+        fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
+        ax.axis('off')
+        st.pyplot(fig)
 
 if view_mode == "Page 1 (Scene Graph)":
     render_page_1()
