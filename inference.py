@@ -56,14 +56,24 @@ def inference(image_path: str):
     with torch.no_grad():
         output = model(image)
         loss_dict = loss_fn(output, image, END_EPOCH)
+        
+        if hasattr(model, 'export_for_inspector'):
+            inspector_payload = model.export_for_inspector(image, batch_idx=0)
 
-    # Result
-    OUTPUT_PATH = 'result.png'
+    # Result Outputs
+    OUTPUT_IMAGE_PATH = 'result.png'
+    OUTPUT_DATA_PATH = 'result.pt'
+    
+    # Save reconstructed image comparison
     comparison = torch.cat([image, output['image']], dim=3)
-    save_image(comparison, OUTPUT_PATH)
+    save_image(comparison, OUTPUT_IMAGE_PATH)
+    print(f"Result image saved in '{OUTPUT_IMAGE_PATH}'")
     
-    print(f"Result saved in '{OUTPUT_PATH}'")
+    # Save data for Inspector
+    torch.save(inspector_payload, OUTPUT_DATA_PATH)
+    print(f"Scene graph data saved in '{OUTPUT_DATA_PATH}'")
     
+    # Metrics breakdown
     print(f"Total Loss: {loss_dict['loss'].item():.4f}")
     print("Loss breakdown:")
     for key, val in loss_dict.items():

@@ -40,6 +40,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         self.d_model = d_model
         self.num_queries = num_queries
         self.d_node = d_node
+        self.num_decoder_layers = num_decoder_layers
 
         # CNN Feature Extraction
         self.cnn_encoder = nn.Sequential()
@@ -193,3 +194,70 @@ class GraphLatentAutoencoder(BaseAutoencoder):
     def get_first_layer(self):
         """Returns the first layer of the CNN encoder"""
         return self.cnn_encoder[0]
+
+    @torch.no_grad()
+    def export_for_inspector(self, x: torch.Tensor, batch_idx: int = 0) -> dict:
+        """
+        Runs a forward pass on an image tensor and completely structures the output dictionary
+        to be perfectly compliant with the Streamlit Scene Graph UI specification.
+        """
+        # Gather raw computational variables
+        out = self.forward(x)
+        
+        gnn_nodes_sample = out['nodes'][batch_idx]       # Shape: (N, d_node)
+        edge_conf_sample = out['edge_conf'][batch_idx]   # Shape: (N, N, 1)
+        node_conf_sample = out['node_conf'][batch_idx]   # Shape: (N, 1)
+        
+        num_nodes = gnn_nodes_sample.shape[0]
+        num_layers = self.num_decoder_layers
+        
+        # Build Dense (N, N) Adjacency Matrix into Flattened Coordinate Lists
+        # Generates row indices and col indices for all possible directed edges
+        rows, cols = torch.meshgrid(torch.arange(num_nodes, device=x.device), 
+                                    torch.arange(num_nodes, device=x.device), 
+                                    indexing='ij')
+        edge_indices = torch.stack([rows.flatten(), cols.flatten()], dim=-1)    # Shape: (N*N, 2)
+        edge_conf_flat = edge_conf_sample.reshape(-1)                           # Shape: (N*N,)
+        
+        # Create default string structures and boolean masks for UI initialization
+        node_conf_flat = node_conf_sample.squeeze(-1)
+        default_node_names = [f"Object {i}" for i in range(num_nodes)]
+        default_edge_names = [f"Rel {src.item()}➔{dst.item()}" for src, dst in edge_indices]
+        
+        # Default boolean visualization arrays (using a 0.5 confidence threshold)
+        default_node_mask = node_conf_flat > 0.5
+        default_edge_mask = edge_conf_flat > 0.5
+        
+        # Handle Attention Maps
+        map_h, map_w = x.shape[2] // 8, x.shape[3] // 8
+        
+        dummy_node_attn = torch.rand(num_nodes, num_layers, map_h, map_w, device=x.device)
+        dummy_global_attn = torch.rand(num_layers, map_h, map_w, device=x.device)
+        dummy_relation_attn = torch.rand(num_layers, map_h, map_w, device=x.device)
+        
+        # Assemble final compliant package structure
+        inspector_payload = {
+            "metadata": {
+                "num_nodes": num_nodes,
+                "num_layers": num_layers
+            },
+            "nodes": {
+                "names": default_node_names,
+                "selected": default_node_mask.cpu(),
+                "confidences": node_conf_flat.cpu(),
+                "embeddings": gnn_nodes_sample.cpu(),
+                "attention_maps": dummy_node_attn.cpu()
+            },
+            "edges": {
+                "names": default_edge_names,
+                "selected": default_edge_mask.cpu(),
+                "confidences": edge_conf_flat.cpu(),
+                "indices": edge_indices.cpu()
+            },
+            "global_tokens": {
+                "global_attention": dummy_global_attn.cpu(),
+                "relation_attention": dummy_relation_attn.cpu()
+            }
+        }
+        
+        return inspector_payload
