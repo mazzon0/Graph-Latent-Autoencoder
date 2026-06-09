@@ -29,14 +29,26 @@ view_mode = st.sidebar.radio("View Mode", ["Page 1 (Scene Graph)", "Page 2 (Atte
 def render_page_1():
     st.subheader("Scene Graph View")
     
-    # Visualization Filtering Options
-    st.markdown("#### Filter Options")
-    filter_choice = st.radio(
-        "Show nodes and edges based on:", 
-        ["Selected Mask", "Confidence Threshold"],
-        horizontal=True
-    )
+    # Filter/Control Options
+    col_ctrl1, col_ctrl2 = st.columns(2)
     
+    with col_ctrl1:
+        st.markdown("#### Filter Options")
+        filter_choice = st.radio(
+            "Show nodes and edges based on:", 
+            ["Selected Mask", "Confidence Threshold"],
+            horizontal=True
+        )
+    
+    with col_ctrl2:
+        st.markdown("#### Similarity Color Scaling")
+        norm_choice = st.radio(
+            "Normalize cosine similarity using:",
+            ["Relative (Contrast Stretch)", "Absolute (-1 to 1 Range)"],
+            horizontal=True
+        )
+        sim_norm_arg = "relative" if norm_choice == "Relative (Contrast Stretch)" else "absolute"
+        
     node_thresh, edge_thresh = 0.0, 0.0
     if filter_choice == "Confidence Threshold":
         col_t1, col_t2 = st.columns(2)
@@ -47,26 +59,50 @@ def render_page_1():
             
     filter_mode_arg = "selected" if filter_choice == "Selected Mask" else "confidence"
     
-    st.write("Click on a node to inspect and edit names.")
+    st.write("Click on a node to inspect, edit names, and see semantic embedding similarity color-mappings.")
+    
+    active_node_idx = st.session_state.get("active_node_idx", None)
     
     nodes, edges = create_ui_elements(
         st.session_state.graph_data, 
         filter_mode=filter_mode_arg, 
         node_thresh=node_thresh, 
-        edge_thresh=edge_thresh
+        edge_thresh=edge_thresh,
+        active_node_idx=active_node_idx,
+        sim_norm_mode=sim_norm_arg
     )
     
-    graph_config = Config(width="100%", height=600, directed=True, physics=True, hierarchical=False)
-    clicked_node_id = agraph(nodes=nodes, edges=edges, config=graph_config)
+    graph_config = Config(
+        width="100%", 
+        height=600, 
+        directed=True, 
+        physics=True, 
+        hierarchical=False,
+        layout={"randomSeed": 42}
+    )
+    
+    with st.container(height=620, border=False):
+        clicked_node_id = agraph(nodes=nodes, edges=edges, config=graph_config)
     
     if clicked_node_id is not None:
         node_idx = int(clicked_node_id)
-        
         st.session_state.active_node_idx = node_idx
+        st.rerun()
         
+    # Editor Panel
+    if "active_node_idx" in st.session_state:
+        node_idx = st.session_state.active_node_idx
+        
+        col_h1, col_h2 = st.columns([0.85, 0.15])
+        with col_h1:
+            st.markdown(f"### Inspecting Node Index: {node_idx}")
+        with col_h2:
+            if st.button("❌ Clear Selection"):
+                del st.session_state.active_node_idx
+                st.rerun()
+                
         col_node, col_edge = st.columns(2)
         
-        # Edit Node
         with col_node:
             st.markdown("#### Edit Node")
             current_node_name = st.session_state.graph_data["nodes"]["names"][node_idx]
@@ -76,7 +112,6 @@ def render_page_1():
                 st.session_state.graph_data["nodes"]["names"][node_idx] = new_node_name
                 st.rerun()
         
-        # Edit Connected Edges
         with col_edge:
             st.markdown("#### Edit Connected Edges")
             edge_indices = st.session_state.graph_data["edges"]["indices"]
