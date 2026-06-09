@@ -28,11 +28,35 @@ view_mode = st.sidebar.radio("View Mode", ["Page 1 (Scene Graph)", "Page 2 (Atte
 
 def render_page_1():
     st.subheader("Scene Graph View")
+    
+    # Visualization Filtering Options
+    st.markdown("#### Filter Options")
+    filter_choice = st.radio(
+        "Show nodes and edges based on:", 
+        ["Selected Mask", "Confidence Threshold"],
+        horizontal=True
+    )
+    
+    node_thresh, edge_thresh = 0.0, 0.0
+    if filter_choice == "Confidence Threshold":
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            node_thresh = st.slider("Node Confidence Threshold", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+        with col_t2:
+            edge_thresh = st.slider("Edge Confidence Threshold", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+            
+    filter_mode_arg = "selected" if filter_choice == "Selected Mask" else "confidence"
+    
     st.write("Click on a node to inspect and edit names.")
     
-    nodes, edges = create_ui_elements(st.session_state.graph_data)
-    graph_config = Config(width="100%", height=600, directed=True, physics=True, hierarchical=False)
+    nodes, edges = create_ui_elements(
+        st.session_state.graph_data, 
+        filter_mode=filter_mode_arg, 
+        node_thresh=node_thresh, 
+        edge_thresh=edge_thresh
+    )
     
+    graph_config = Config(width="100%", height=600, directed=True, physics=True, hierarchical=False)
     clicked_node_id = agraph(nodes=nodes, edges=edges, config=graph_config)
     
     if clicked_node_id is not None:
@@ -78,7 +102,6 @@ def render_page_1():
 def render_page_2():
     st.subheader("Attention Map View")
     
-    # Target Selection
     target_type = st.radio(
         "Select Attention Target:", 
         ["Selected Node", "Global Token", "Relation Token"], 
@@ -91,7 +114,6 @@ def render_page_2():
     
     attn_map_tensor = None
     
-    # Extract the correct tensor based on the user's choice
     if target_type == "Selected Node":
         if "active_node_idx" not in st.session_state:
             st.info("👈 Please click a node in the Scene Graph first.")
@@ -110,7 +132,6 @@ def render_page_2():
         st.markdown("**Viewing Attention for:** `Relation Token`")
         attn_map_tensor = st.session_state.graph_data["global_tokens"]["relation_attention"][layer_idx]
     
-    # Render the heatmap
     if attn_map_tensor is not None:
         fig, ax = plt.subplots(figsize=(6, 6))
         cax = ax.imshow(attn_map_tensor.numpy(), cmap='jet', interpolation='nearest')
