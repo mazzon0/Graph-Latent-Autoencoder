@@ -24,7 +24,7 @@ if st.sidebar.button("💾 Save Changes to File", type="primary"):
     st.sidebar.success(f"Overwrote {file_path} successfully!")
 
 st.sidebar.divider()
-view_mode = st.sidebar.radio("View Mode", ["Page 1 (Scene Graph)", "Page 2 (Attention Maps)", "Side-by-Side"])
+view_mode = st.sidebar.radio("View Mode", ["Side-by-Side", "Page 1 (Scene Graph)", "Page 2 (Attention Maps)"])
 
 def render_page_1():
     st.subheader("Scene Graph View")
@@ -86,8 +86,10 @@ def render_page_1():
     
     if clicked_node_id is not None:
         node_idx = int(clicked_node_id)
-        st.session_state.active_node_idx = node_idx
-        st.rerun()
+        # Only rerun if the clicked node is actually new
+        if st.session_state.get("active_node_idx") != node_idx:
+            st.session_state.active_node_idx = node_idx
+            st.rerun()
         
     # Editor Panel
     if "active_node_idx" in st.session_state:
