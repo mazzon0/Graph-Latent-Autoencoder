@@ -8,6 +8,7 @@ This is achieved with an image-to-graph-to-image autoencoder.
     * [Setup](#setup)
     * [Training](#training)
     * [Inference](#inference)
+    * [Inspect](#inspect)
 * [Configuration](#configuration)
     * [General](#general)
     * [Models](#models)
@@ -56,6 +57,14 @@ Before executing the model, you need to activate the virtual environment with `s
 python3 inference.py configs/some_configuration.yaml some_image.jpg
 ```
 Then, you can deactivate the virtual environment with `deactivate`.
+
+### Inspect
+
+The inference script stores some data about the latent graph in the `result.pt` file.
+You can open the inspector to analyze this file in the browser.
+```bash
+streamlit run inspector.py result.pt
+```
 
 ## Configuration
 
