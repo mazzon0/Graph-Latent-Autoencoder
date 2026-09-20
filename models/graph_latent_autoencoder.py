@@ -195,6 +195,35 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         return self.cnn_encoder[0]
 
     @torch.no_grad()
+    def _capture_cross_attention(self, x: torch.Tensor) -> list:
+        """
+        Runs a forward pass and returns the decoder cross-attention weights of each layer,
+        averaged over the heads. Each element has shape (B, num_queries, h*w).
+        nn.Transformer does not expose them, so need_weights is forced on with hooks.
+        """
+        captured = []
+        handles = []
+
+        def force_weights(module, args, kwargs):
+            kwargs['need_weights'] = True
+            kwargs['average_attn_weights'] = True
+            return args, kwargs
+
+        def capture(module, args, kwargs, output):
+            captured.append(output[1].detach())
+
+        for layer in self.transformer.transformer.decoder.layers:
+            handles.append(layer.multihead_attn.register_forward_pre_hook(force_weights, with_kwargs=True))
+            handles.append(layer.multihead_attn.register_forward_hook(capture, with_kwargs=True))
+
+        try:
+            self.forward(x)
+        finally:
+            for h in handles:
+                h.remove()
+        return captured
+
+    @torch.no_grad()
     def export_for_inspector(self, x: torch.Tensor, batch_idx: int = 0) -> dict:
         """
         Runs a forward pass on an image tensor and completely structures the output dictionary
@@ -227,12 +256,16 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         default_node_mask = node_conf_flat > 0.5
         default_edge_mask = edge_conf_flat > 0.5
         
-        # Handle Attention Maps
-        map_h, map_w = x.shape[2] // 8, x.shape[3] // 8
-        
-        dummy_node_attn = torch.rand(num_nodes, num_layers, map_h, map_w, device=x.device)
-        dummy_global_attn = torch.rand(num_layers, map_h, map_w, device=x.device)
-        dummy_relation_attn = torch.rand(num_layers, map_h, map_w, device=x.device)
+        # Handle Attention Maps: the head-averaged cross-attention of each decoder layer (num_layers, num_queries, h*w), reshaped over the CNN feature map grid.
+        attn = self._capture_cross_attention(x)
+        attn = torch.stack([a[batch_idx] for a in attn])    # (L, num_queries, h*w)
+        stride = 2 ** sum(isinstance(m, nn.Conv2d) for m in self.cnn_encoder)
+        map_h, map_w = x.shape[2] // stride, x.shape[3] // stride
+        attn = attn.reshape(num_layers, attn.shape[1], map_h, map_w)
+
+        global_attn = attn[:, 0]                    # (L, h, w)
+        relation_attn = attn[:, 1]                  # (L, h, w)
+        node_attn = attn[:, 2:].permute(1, 0, 2, 3) # (N, L, h, w)
         
         # Assemble final compliant package structure
         inspector_payload = {
@@ -245,7 +278,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
                 "selected": default_node_mask.cpu(),
                 "confidences": node_conf_flat.cpu(),
                 "embeddings": gnn_nodes_sample.cpu(),
-                "attention_maps": dummy_node_attn.cpu()
+                "attention_maps": node_attn.cpu()
             },
             "edges": {
                 "names": default_edge_names,
@@ -254,8 +287,8 @@ class GraphLatentAutoencoder(BaseAutoencoder):
                 "indices": edge_indices.cpu()
             },
             "global_tokens": {
-                "global_attention": dummy_global_attn.cpu(),
-                "relation_attention": dummy_relation_attn.cpu()
+                "global_attention": global_attn.cpu(),
+                "relation_attention": relation_attn.cpu()
             }
         }
         
