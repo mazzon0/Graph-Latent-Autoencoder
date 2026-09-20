@@ -28,7 +28,7 @@ class GraphLatentAutoencoderLoss(nn.Module):
         if epoch < self.delay_epochs:
             warmup_factor = 0.0
         else:
-            warmup_factor = min(1.0, (epoch - self.delay_epochs) / self.ramp_epochs)
+            warmup_factor = min(1.0, (epoch - self.delay_epochs) / self.ramp_epochs) if self.ramp_epochs > 0 else 1.0
 
         loss = (self.alpha * losses['reconstruction'] + 
                 warmup_factor * (self.beta * losses['nodes'] + self.gamma * losses['edges']))

@@ -52,6 +52,7 @@ def inference(image_path: str):
         model.load_state_dict(loaded_data['model_state_dict'], strict=True)
     
     # Inference
+    inspector_payload = None
     model.eval()
     with torch.no_grad():
         output = model(image)
@@ -70,8 +71,9 @@ def inference(image_path: str):
     print(f"Result image saved in '{OUTPUT_IMAGE_PATH}'")
     
     # Save data for Inspector
-    torch.save(inspector_payload, OUTPUT_DATA_PATH)
-    print(f"Scene graph data saved in '{OUTPUT_DATA_PATH}'")
+    if inspector_payload is not None:
+        torch.save(inspector_payload, OUTPUT_DATA_PATH)
+        print(f"Scene graph data saved in '{OUTPUT_DATA_PATH}'")
     
     # Metrics breakdown
     print(f"Total Loss: {loss_dict['loss'].item():.4f}")
