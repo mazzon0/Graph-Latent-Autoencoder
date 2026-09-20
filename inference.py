@@ -2,14 +2,17 @@ import torch
 from torchvision.transforms import v2
 from torchvision.utils import save_image
 import yaml
+import os
 import sys
 from PIL import Image
 
 from models import get_model
 from losses import get_loss
+from utils.experiment import resolve_checkpoint
 
 FROM_CHECKPOINT = True
 CHECKPOINT_FILE = ''
+EXPERIMENT_NAME = None
 END_EPOCH = 0
 
 MODEL = None
@@ -20,9 +23,10 @@ def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
         if config:
-            global CHECKPOINT_FILE, MODEL, LOSS, MODEL_CONFIG, LOSS_CONFIG, END_EPOCH
+            global CHECKPOINT_FILE, EXPERIMENT_NAME, MODEL, LOSS, MODEL_CONFIG, LOSS_CONFIG, END_EPOCH
             END_EPOCH = config.get('end_epoch', END_EPOCH)
             CHECKPOINT_FILE = config.get('checkpoint_file', "")
+            EXPERIMENT_NAME = config.get('experiment_name', None)
             MODEL = config.get('model', "cnn")
             MODEL_CONFIG = config.get('model_' + MODEL, None)
             LOSS = config.get('loss', dict())
@@ -47,8 +51,11 @@ def inference(image_path: str):
     # Initialize model, loss and optimizer
     model = get_model(MODEL, MODEL_CONFIG).to(device)
     loss_fn = get_loss(LOSS).to(device)
+    output_dir = "."
     if FROM_CHECKPOINT:
-        loaded_data = torch.load(CHECKPOINT_FILE, map_location=device)
+        checkpoint_path = resolve_checkpoint(CHECKPOINT_FILE, EXPERIMENT_NAME)
+        output_dir = os.path.join(os.path.dirname(checkpoint_path), "inference")
+        loaded_data = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(loaded_data['model_state_dict'], strict=True)
     
     # Inference
@@ -62,8 +69,10 @@ def inference(image_path: str):
             inspector_payload = model.export_for_inspector(image, batch_idx=0)
 
     # Result Outputs
-    OUTPUT_IMAGE_PATH = 'result.png'
-    OUTPUT_DATA_PATH = 'result.pt'
+    os.makedirs(output_dir, exist_ok=True)
+    image_name = os.path.splitext(os.path.basename(image_path))[0]
+    OUTPUT_IMAGE_PATH = os.path.join(output_dir, image_name + '.png')
+    OUTPUT_DATA_PATH = os.path.join(output_dir, image_name + '.pt')
     
     # Save reconstructed image comparison
     comparison = torch.cat([image, output['image']], dim=3)

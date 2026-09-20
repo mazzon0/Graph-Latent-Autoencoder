@@ -3,17 +3,21 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 import yaml
 import sys
+import os
 import time
 
 from models import get_model
 from optimizers import get_lr_lambda, get_optimizer
 from losses import get_loss
 from datasets import get_dataset
+from utils.experiment import create_experiment_dir, resolve_checkpoint, log_metrics
 
 START_EPOCH = 0
 END_EPOCH = 0
 FROM_CHECKPOINT = False
 CHECKPOINT_FILE = ''
+EXPERIMENT_NAME = None
+CONFIG_PATH = ''
 BATCH_SIZE = 1
 NUM_WORKERS = 1
 
@@ -31,11 +35,12 @@ def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
         if config:
-            global START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, BATCH_SIZE, NUM_WORKERS, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG, DATASET
+            global START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, EXPERIMENT_NAME, BATCH_SIZE, NUM_WORKERS, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG, DATASET
             START_EPOCH = config.get('start_epoch', 0)
             END_EPOCH = config.get('end_epoch', 1)
             FROM_CHECKPOINT = config.get('from_checkpoint', False)
             CHECKPOINT_FILE = config.get('checkpoint_file', "")
+            EXPERIMENT_NAME = config.get('experiment_name', None)
             BATCH_SIZE = config.get('batch_size', 1)
             NUM_WORKERS = config.get('num_workers', 1)
 
@@ -55,6 +60,11 @@ def train():
     if torch.cuda.is_available():   print("Training on CUDA GPU")
     else:                           print("Training on CPU")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Experiment directory (resumed runs reuse the same directory)
+    resume = FROM_CHECKPOINT and EXPERIMENT_NAME is not None and os.path.isdir(os.path.join("experiments", EXPERIMENT_NAME))
+    experiment_dir = create_experiment_dir(CONFIG_PATH, MODEL, EXPERIMENT_NAME, resume)
+    print(f"Experiment directory: {experiment_dir}")
 
     # Data Preprocessing
     train_transform = v2.Compose([
@@ -84,7 +94,7 @@ def train():
     optimizer = get_optimizer(model, OPTIMIZER, OPTIMIZER_CONFIG)
     best_loss = float('inf')
     if FROM_CHECKPOINT:
-        loaded_data = torch.load(CHECKPOINT_FILE, map_location=device)
+        loaded_data = torch.load(resolve_checkpoint(CHECKPOINT_FILE, EXPERIMENT_NAME), map_location=device)
         model.load_state_dict(loaded_data['model_state_dict'], strict=True)
         optimizer.load_state_dict(loaded_data['optimizer_state_dict'])
         best_loss = float(loaded_data.get('loss', float('inf')))
@@ -157,13 +167,21 @@ def train():
             'scheduler_state_dict': scheduler.state_dict(),
             'loss': val_losses['loss']
         }
-        torch.save(checkpoint, "last.pth")
+        torch.save(checkpoint, os.path.join(experiment_dir, "last.pth"))
         if val_losses['loss'] < best_loss:
             print("New best model")
             best_loss = val_losses['loss']
-            torch.save(checkpoint, "best.pth")
+            torch.save(checkpoint, os.path.join(experiment_dir, "best.pth"))
 
         scheduler.step()
+
+        log_metrics(experiment_dir, {
+            'epoch': epoch,
+            'seconds': time.time() - start,
+            'lr': scheduler.get_last_lr()[0],
+            'train': train_losses,
+            'val': val_losses,
+        })
 
         print(f"Epoch {epoch}/{END_EPOCH}  -  {time.time() - start:.2f} seconds")
         print(f"First Layer Grad Norms: median = {median_norm:.4f}, mean = {avg_norm:.4f}, std = {std_norm:.4f}")
@@ -173,5 +191,6 @@ def train():
         print("-" * 80)
         
 if __name__ == '__main__':
-    load_config(sys.argv[1])
+    CONFIG_PATH = sys.argv[1]
+    load_config(CONFIG_PATH)
     train()

@@ -57,7 +57,7 @@ powershell -ExecutionPolicy Bypass -File download.ps1
 
 ### Training
 
-Train the model (storing last and best model each epoch). The model, the loss, the optimizer, the lr scheduler and other parameters can be customized on the configuration file.
+Train the model (storing last and best model each epoch in its own experiment directory, see [Experiments](#experiments)). The model, the loss, the optimizer, the lr scheduler and other parameters can be customized on the configuration file.
 Before training, you need to activate the virtual environment with `source .venv/bin/activate`.
 ```bash
 python3 train.py configs/some_configuration.yaml
@@ -66,7 +66,7 @@ Then, you can deactivate the virtual environment with `deactivate`.
 
 ### Inference
 
-Test the model on a single image with the inference script. It will tell you the loss and the will save the original and reconstructed image side to side in `result.png`. You can use the same configuration file used for the training, specifying the model to use in the `from_checkpoint` field.
+Test the model on a single image. It will tell you the loss and the will save the original and reconstructed image side to side in `<experiment dir>/inference/<image name>.png`. You can use the same configuration file used for the training, specifying the model to use in the `from_checkpoint` field.
 Before executing the model, you need to activate the virtual environment with `source .venv/bin/activate`.
 ```bash
 python3 inference.py configs/some_configuration.yaml some_image.jpg
@@ -75,11 +75,28 @@ Then, you can deactivate the virtual environment with `deactivate`.
 
 ### Inspect
 
-The inference script stores some data about the latent graph in the `result.pt` file.
+The inference script stores some data about the latent graph in `<experiment dir>/inference/<image name>.pt`.
 You can open the inspector to analyze this file in the browser.
 ```bash
-streamlit run inspector.py result.pt
+streamlit run inspector.py experiments/some_experiment/inference/some_image.pt
 ```
+
+### Experiments
+
+Each training run has its own directory in `experiments/`:
+```
+experiments/<name>/
+    config.yaml      copy of the configuration used
+    best.pth         checkpoint with the best validation loss
+    last.pth         checkpoint of the last epoch
+    metrics.jsonl    one json line per epoch: epoch, seconds, lr, train and val losses
+    inference/       outputs of inference.py (<image name>.png and <image name>.pt)
+```
+The name is the optional `experiment_name` field of the configuration, `<model>_<timestamp>` by default.
+Starting a run with the name of an existing experiment is refused, so results are never overwritten.
+To resume a training, set `from_checkpoint: true` with the `experiment_name` of the existing experiment: the same directory is reused, the metrics are appended and a timestamped copy of the new configuration is saved next to the original.
+`checkpoint_file` is looked up as given, and otherwise inside the experiment directory (`best.pth` refers to `experiments/<experiment_name>/best.pth`).
+To start a new experiment from an old checkpoint, give an `experiment_name` and a path to the checkpoint (`checkpoint_file: "experiments/old/best.pth"`).
 
 ## Configuration
 
@@ -88,6 +105,8 @@ All configuration files needs some general values.
 
 `model` allows to select an autoencoder model, `optimizer` allows to select an optimizer and `dataset` allows to select a dataset.
 `start_epoch` and `end_epoch` allows to choose the range of epochs for the training process. Epochs are 0 based. `start_epoch` and `end_epoch` are included in the range.
+
+`experiment_name` (optional) is the name of the directory of the experiment.
 
 It is possible to initialize the model and the optimizer from a checkpoint, by setting `from_checkpoint` to `true` and specifying the path of the model in `checkpoint_file`. If `from_checkpoint` is `false`, then `checkpoint_file` is ignored.
 
