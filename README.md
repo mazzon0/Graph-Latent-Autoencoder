@@ -24,20 +24,35 @@ This is achieved with an image-to-graph-to-image autoencoder.
 
 Download the repository.
 ```bash
-git clone git@github.com:mazzon0/Graph-Latent-Autoencoder.git && cd Graph-Latent-Autoencoder
+git clone git@github.com:mazzon0/Graph-Latent-Autoencoder.git
+cd Graph-Latent-Autoencoder
 ```
 
 Create the virtual environment.
+For Linux systems:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 deactivate
 ```
+For Windows systems:
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128
+Get-Content requirements.txt | Where-Object { $_ -notmatch '^(nvidia-|cuda-|triton|torch==|torchvision==)' } | Set-Content requirements-windows.txt
+pip install -r requirements-windows.txt
+```
 
 Download the COCO dataset.
+For Linux systems:
 ```bash
 ./download.sh
+```
+For Windows systems:
+```powershell
+powershell -ExecutionPolicy Bypass -File download.ps1
 ```
 
 ### Training
