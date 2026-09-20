@@ -75,7 +75,7 @@ class HybridLoss(LossModule):
                 case "linear":
                     pass
                 case "cosine":
-                    x = 1 - math.cos(x)
+                    x = (1 - math.cos(math.pi * x)) / 2
 
             alpha = x * self.end_val + (1 - x) * self.start_val
 
