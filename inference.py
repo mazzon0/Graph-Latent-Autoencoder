@@ -6,13 +6,14 @@ import os
 import sys
 from PIL import Image
 
-from models import get_model
+from models import get_model, apply_sigmoid_if_requested
 from losses import get_loss
 from utils.experiment import resolve_checkpoint
 
 FROM_CHECKPOINT = True
 CHECKPOINT_FILE = ''
 EXPERIMENT_NAME = None
+APPLY_SIGMOID = True
 END_EPOCH = 0
 
 MODEL = None
@@ -23,13 +24,14 @@ def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
         if config:
-            global CHECKPOINT_FILE, EXPERIMENT_NAME, MODEL, LOSS, MODEL_CONFIG, LOSS_CONFIG, END_EPOCH
+            global APPLY_SIGMOID, CHECKPOINT_FILE, EXPERIMENT_NAME, MODEL, LOSS, MODEL_CONFIG, LOSS_CONFIG, END_EPOCH
             END_EPOCH = config.get('end_epoch', END_EPOCH)
             CHECKPOINT_FILE = config.get('checkpoint_file', "")
             EXPERIMENT_NAME = config.get('experiment_name', None)
             MODEL = config.get('model', "cnn")
             MODEL_CONFIG = config.get('model_' + MODEL, None)
             LOSS = config.get('loss', dict())
+            APPLY_SIGMOID = MODEL_CONFIG.get('apply_sigmoid', True)
 
 def inference(image_path: str):
     if torch.cuda.is_available():   print("Inference on CUDA GPU")
@@ -62,8 +64,8 @@ def inference(image_path: str):
     inspector_payload = None
     model.eval()
     with torch.no_grad():
-        output = model(image)
-        loss_dict = loss_fn(output, image, END_EPOCH)
+        output = model(image)                                               # image logits
+        loss_dict = loss_fn(apply_sigmoid_if_requested(output, APPLY_SIGMOID), image, END_EPOCH)
         
         if hasattr(model, 'export_for_inspector'):
             inspector_payload = model.export_for_inspector(image, batch_idx=0)
@@ -75,7 +77,7 @@ def inference(image_path: str):
     OUTPUT_DATA_PATH = os.path.join(output_dir, image_name + '.pt')
     
     # Save reconstructed image comparison
-    comparison = torch.cat([image, output['image']], dim=3)
+    comparison = torch.cat([image, torch.sigmoid(output['image'])], dim=3)    # the saved image always needs values in [0, 1]
     save_image(comparison, OUTPUT_IMAGE_PATH)
     print(f"Result image saved in '{OUTPUT_IMAGE_PATH}'")
     

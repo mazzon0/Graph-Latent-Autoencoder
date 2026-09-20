@@ -23,8 +23,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
                  d_node: int = 64,
                  d_edge: int = 64,
                  d_global: int = 64,
-                 gnn_layers: int = 4,
-                 train_with_sigmoid: bool = True):
+                 gnn_layers: int = 4):
         """
         Args:
             image_shape (list): [C, H, W] of the input image. 
@@ -91,7 +90,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
             self.gnn.append(AttentionGraphBlock(d_node, d_edge, d_global))
 
         # Image Generation
-        self.image_generator = GraphToImageDecoder(d_node, init_channels=256, init_size=4, out_channels=3, train_with_sigmoid=train_with_sigmoid)
+        self.image_generator = GraphToImageDecoder(d_node, init_channels=256, init_size=4, out_channels=3)
 
         self._init_weights()
 

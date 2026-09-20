@@ -12,7 +12,7 @@ model_cnn:
   image_shape: [3, 64, 64]
   channels: [3, 64, 128, 256]
   mlp_sizes: [16384, 2048, 1024]
-  train_with_sigmoid: true
+  apply_sigmoid: true
 
 optimizer_adamw:
   lr: 1e-4

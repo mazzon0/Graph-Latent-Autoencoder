@@ -1,5 +1,14 @@
+import torch
 from .cnn_autoencoder import CnnAutoencoder
 from .graph_latent_autoencoder import GraphLatentAutoencoder
+
+def apply_sigmoid_if_requested(outputs: dict, apply_sigmoid: bool) -> dict:
+    """
+    If requested, this maps logits to [0, 1] with a sigmoid. Should be used with BCE loss.
+    """
+    if not apply_sigmoid:
+        return outputs
+    return {**outputs, 'image': torch.sigmoid(outputs['image'])}
 
 def get_model(name: str, config: dict):
     image_shape = config.get('image_shape', [3, 64, 64])
@@ -18,7 +27,6 @@ def get_model(name: str, config: dict):
     d_edge = config.get('d_edge', 64)
     d_global = config.get('d_global', 64)
     gnn_layers = config.get('gnn_layers', 4)
-    train_with_sigmoid = config.get('train_with_sigmoid', True)
 
     print("Model: ", end="")
     match(name):
@@ -42,7 +50,6 @@ def get_model(name: str, config: dict):
                 d_node,
                 d_edge,
                 d_global,
-                gnn_layers,
-                train_with_sigmoid)
+                gnn_layers)
 
     return None

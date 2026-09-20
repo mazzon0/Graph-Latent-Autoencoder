@@ -6,7 +6,7 @@ class CnnAutoencoder(BaseAutoencoder):
     """
     A Deep Convolutional Autoencoder with a fully-connected MLP bottleneck.
     """
-    def __init__(self, image_shape: list, channels: list, mlp_sizes: list, train_with_sigmoid: bool = True):
+    def __init__(self, image_shape: list, channels: list, mlp_sizes: list):
         """
         Args:
             image_shape (list): [C, H, W] of the input image. 
@@ -17,10 +17,6 @@ class CnnAutoencoder(BaseAutoencoder):
             mlp_sizes (list): List of hidden units for the MLP bottleneck.
                 Example: [1024, 512, 256]. First element must match the 
                 flattened output of the final CNN encoder layer.
-            train_with_sigmoid (bool): Validation always applies sigmoid at the end.
-                Training applies sigmoid depending on this value.
-                Example: nn.BCEWithLogits loss needs the logits during the training phase,
-                requiring this parameter set to False.
         """
         super().__init__()
         assert(image_shape[0] == channels[0])   # The CNN input channels do not meet the image channels
@@ -28,7 +24,6 @@ class CnnAutoencoder(BaseAutoencoder):
         assert((image_shape[2] & (image_shape[2] - 1)) == 0)    # Image width is not a power of 2
         self.image_shape = image_shape
         assert(channels[-1] * self.image_shape[1] // 2**(len(channels)-1) * self.image_shape[2] // 2**(len(channels)-1) == mlp_sizes[0])    # The CNN output size does not meet the MLP input size
-        self.train_with_sigmoid = train_with_sigmoid
 
         # CNN Encoder
         self.cnn_encoder = nn.Sequential()
@@ -100,9 +95,6 @@ class CnnAutoencoder(BaseAutoencoder):
         x = self.mlp_encoder(x)
         x = self.mlp_decoder(x)
         x = self.cnn_decoder(x)
-
-        if not self.training or self.train_with_sigmoid:
-            x = torch.sigmoid(x)
 
         return {
             'image': x,

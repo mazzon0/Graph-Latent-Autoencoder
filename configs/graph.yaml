@@ -24,7 +24,7 @@ model_graph:
   d_edge: 64
   d_global: 64
   gnn_layers: 4
-  train_with_sigmoid: true
+  apply_sigmoid: true
 
 optimizer_adamw:
   lr: 1e-4

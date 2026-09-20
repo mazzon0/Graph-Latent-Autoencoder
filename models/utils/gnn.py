@@ -177,11 +177,10 @@ class GraphToImageDecoder(nn.Module):
     to generate a low-res latent grid, and upscales it to a final image.
     """
     def __init__(self, d_node: int, d_pos: int = 32, init_channels: int = 256, 
-                 init_size: int = 4, out_channels: int = 3, train_with_sigmoid: bool = True):
+                 init_size: int = 4, out_channels: int = 3):
         super().__init__()
         self.init_channels = init_channels
         self.init_size = init_size
-        self.train_with_sigmoid = train_with_sigmoid
         
         # Positional Embeddings
         self.pos_embeddings = nn.Parameter(torch.randn(init_size, init_size, d_pos))
@@ -231,9 +230,5 @@ class GraphToImageDecoder(nn.Module):
         low_res_image = latent_grid.permute(0, 3, 1, 2)
         
         # Standard upscaling pass
-        final_image = self.upscaler(low_res_image)
-
-        if not self.training or self.train_with_sigmoid:
-            final_image = torch.sigmoid(final_image)
-        
-        return final_image
+        # Returns logits: the sigmoid, if needed, is applied outside of the model (see apply_sigmoid_if_requested)
+        return self.upscaler(low_res_image)

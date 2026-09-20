@@ -147,16 +147,17 @@ The number of layers of the CNN Encoder (and also CNN Decoder) is going to be `l
 `mlp_sizes` allows to select the size of the intermediate representation of the MLP Encoder (and also MLP Decoder).
 The number of layers of the MLP Encoder (and also the MLP Decoder) is going to be `len(mlp_sizes) - 1`.
 
-The output images have values in the range [0, 1], so a sigmoid activation function is added at the end.
-During training, for compatibility with the BCE loss, it is possible to return the actual logits,
-by setting `train_with_sigmoid` to `false` (the sigmoid is applied only at inference).
+The output image is made of logits: the model does not apply any final activation.
+`apply_sigmoid` decides whether a sigmoid is applied to them (mapping the values to [0, 1]) before computing the loss, in training, validation and inference.
+It should be `true` for the `l1`, `l2`, `ssim` and `hybrid` losses, and `false` for `bce` (which works directly on the logits).
+The images saved by the inference script always get the sigmoid.
 
 ```yaml
 model_cnn:
   image_shape: [3, 64, 64]
   channels: [3, 64, 128, 256]
   mlp_sizes: [16384, 2048, 1024]
-  train_with_sigmoid: true
+  apply_sigmoid: true
 ```
 
 The **Graph Latent Autoencoder** can be customized adding the field `model_graph`.
@@ -193,9 +194,10 @@ The number of layers of the CNN Encoder (and also CNN Decoder) is going to be `l
 
 `gnn_layers` is the number of message-passing layer iterations within the Graph Neural Network (GNN) module.
 
-The output images have values in the range [0, 1], so a sigmoid activation function is added at the end.
-During training, for compatibility with the BCE loss, it is possible to return the actual logits,
-by setting `train_with_sigmoid` to `false` (the sigmoid is applied only at inference).
+The output image is made of logits: the model does not apply any final activation.
+`apply_sigmoid` decides whether a sigmoid is applied to them (mapping the values to [0, 1]) before computing the loss, in training, validation and inference.
+It should be `true` for the `l1`, `l2`, `ssim` and `hybrid` losses, and `false` for `bce` (which works directly on the logits).
+The images saved by the inference script always get the sigmoid.
 
 ```yaml
 model_graph:
@@ -214,7 +216,7 @@ model_graph:
   d_edge: 64
   d_global: 64
   gnn_layers: 4
-  train_with_sigmoid: true
+  apply_sigmoid: true
 ```
 
 ### Optimizers

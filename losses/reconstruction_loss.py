@@ -37,7 +37,7 @@ class BCELoss(LossModule):
         reduction = config.get('reduction', "mean")
         self.loss = nn.BCEWithLogitsLoss(reduction=reduction)
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, epoch=0):
         return {'reconstruction': self.loss(outputs, targets)}
 
 class SSIMLoss(LossModule):
@@ -46,7 +46,7 @@ class SSIMLoss(LossModule):
         super().__init__()
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, epoch=0):
         return {'reconstruction': (1 - self.ssim(outputs, targets)) / 2}
     
 class HybridLoss(LossModule):

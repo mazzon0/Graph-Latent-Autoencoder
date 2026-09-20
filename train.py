@@ -6,7 +6,7 @@ import sys
 import os
 import time
 
-from models import get_model
+from models import get_model, apply_sigmoid_if_requested
 from optimizers import get_lr_lambda, get_optimizer
 from losses import get_loss
 from datasets import get_dataset
@@ -17,6 +17,7 @@ END_EPOCH = 0
 FROM_CHECKPOINT = False
 CHECKPOINT_FILE = ''
 EXPERIMENT_NAME = None
+APPLY_SIGMOID = True
 CONFIG_PATH = ''
 BATCH_SIZE = 1
 NUM_WORKERS = 1
@@ -35,7 +36,7 @@ def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
         if config:
-            global START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, EXPERIMENT_NAME, BATCH_SIZE, NUM_WORKERS, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG, DATASET
+            global APPLY_SIGMOID, START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, EXPERIMENT_NAME, BATCH_SIZE, NUM_WORKERS, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG, DATASET
             START_EPOCH = config.get('start_epoch', 0)
             END_EPOCH = config.get('end_epoch', 1)
             FROM_CHECKPOINT = config.get('from_checkpoint', False)
@@ -49,6 +50,7 @@ def load_config(filename: str):
             OPTIMIZER = config.get('optimizer', "adamw")
             OPTIMIZER_CONFIG = config.get('optimizer_' + OPTIMIZER, None)
             LOSS = config.get('loss', dict())
+            APPLY_SIGMOID = MODEL_CONFIG.get('apply_sigmoid', True)
             DATASET = config.get('dataset', "coco")
 
 def collate_autoencoder(batch):
@@ -119,7 +121,7 @@ def train():
             images = batch[0] if isinstance(batch, (list, tuple)) else batch
             images = images.to(device, non_blocking=True)
 
-            outputs = model(images)
+            outputs = apply_sigmoid_if_requested(model(images), APPLY_SIGMOID)
             
             loss = loss_fn(outputs, images, epoch)
 
@@ -149,7 +151,7 @@ def train():
                 images = batch[0] if isinstance(batch, (list, tuple)) else batch
                 images = images.to(device, non_blocking=True)
                 
-                outputs = model(images)
+                outputs = apply_sigmoid_if_requested(model(images), APPLY_SIGMOID)
                 loss = loss_fn(outputs, images, epoch)
                 
                 for key, l in loss.items():
