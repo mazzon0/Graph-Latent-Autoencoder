@@ -14,4 +14,6 @@ class DiscreteRegularizer(nn.Module):
         self.threshold = threshold
 
     def forward(self, conf: torch.Tensor):
-        return (conf > self.threshold).float().mean()
+        hard = (conf > self.threshold).float()
+        active = conf * hard
+        return (hard + active - active.detach()).mean()
