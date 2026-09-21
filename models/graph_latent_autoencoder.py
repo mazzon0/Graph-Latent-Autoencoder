@@ -23,11 +23,16 @@ class GraphLatentAutoencoder(BaseAutoencoder):
                  d_node: int = 64,
                  d_edge: int = 64,
                  d_global: int = 64,
-                 gnn_layers: int = 4):
+                 gnn_layers: int = 4,
+                 node_threshold: float = 0.0,
+                 edge_threshold: float = 0.0):
         """
         Args:
             image_shape (list): [C, H, W] of the input image. 
                 Constraints: H and W must be powers of 2.
+            node_threshold (float): Target confidence threshold for the nodes: nodes with a lower confidence are pruned.
+            edge_threshold (float): Same for the edges. An edge is also pruned if one of its nodes is pruned.
+                The thresholds grow from 0 (dense graph) to these values following the sparsity schedule (see set_sparsity_progress).
         """
         super().__init__()
         assert(image_shape[0] == channels[0])   # The CNN input channels do not meet the image channels
@@ -40,6 +45,9 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         self.num_queries = num_queries
         self.d_node = d_node
         self.num_decoder_layers = num_decoder_layers
+        self.node_threshold_target = node_threshold
+        self.edge_threshold_target = edge_threshold
+        self.sparsity_progress = 1.0
 
         # CNN Feature Extraction
         self.cnn_encoder = nn.Sequential()
@@ -153,22 +161,28 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         # Global
         global_out = self.global_predictor(global_token)
 
-        # Apply confidence scores
+        # Confidence scores
         node_features = nodes[..., :-1]               # (B, N, d_node)
         node_conf = torch.sigmoid(nodes[..., -1:])    # (B, N, 1)
-        nodes_out = node_features * node_conf
-        
         edge_features = edges[..., :-1]               # (B, N, N, d_edge)
         edge_conf = torch.sigmoid(edges[..., -1:])    # (B, N, N, 1)
-        edges_out = edge_features * edge_conf
+
+        # Gating: nodes and edges below the threshold are pruned. An edge is also pruned if one of its nodes is pruned.
+        node_threshold = self.node_threshold_target * self.sparsity_progress
+        edge_threshold = self.edge_threshold_target * self.sparsity_progress
+        node_keep = node_conf > node_threshold                                                        # (B, N, 1)
+        edge_keep = (edge_conf > edge_threshold) & node_keep.unsqueeze(2) & node_keep.unsqueeze(1)    # (B, N, N, 1)
+
+        nodes_out = node_features * node_conf * node_keep
+        edges_out = edge_features * edge_conf * edge_keep
 
         # GNN
         gnn_nodes = nodes_out
         gnn_edges = edges_out
         gnn_global = global_out
-        
+
         for gnn_layer in self.gnn:
-            gnn_nodes, gnn_edges, gnn_global = gnn_layer(gnn_nodes, gnn_edges, gnn_global)
+            gnn_nodes, gnn_edges, gnn_global = gnn_layer(gnn_nodes, gnn_edges, gnn_global, node_keep, edge_keep)
 
         # Image Generation
         reconstructed_image = self.image_generator(gnn_nodes)
@@ -179,8 +193,16 @@ class GraphLatentAutoencoder(BaseAutoencoder):
             'edges': gnn_edges,
             'global': gnn_global,
             'node_conf': node_conf,
-            'edge_conf': edge_conf
+            'edge_conf': edge_conf,
+            'node_keep': node_keep,
+            'edge_keep': edge_keep,
+            'node_threshold': torch.tensor(node_threshold, device=x.device),
+            'edge_threshold': torch.tensor(edge_threshold, device=x.device),
         }
+
+    def set_sparsity_progress(self, progress: float):
+        """Sets the gating thresholds to `progress` * target thresholds (0 = dense graph, 1 = target sparsity)."""
+        self.sparsity_progress = float(progress)
     
     def get_first_layer(self):
         """Returns the first layer of the CNN encoder"""
@@ -244,9 +266,9 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         default_node_names = [f"Object {i}" for i in range(num_nodes)]
         default_edge_names = [f"Rel {src.item()}➔{dst.item()}" for src, dst in edge_indices]
         
-        # Default boolean visualization arrays (using a 0.5 confidence threshold)
-        default_node_mask = node_conf_flat > 0.5
-        default_edge_mask = edge_conf_flat > 0.5
+        # Default boolean visualization arrays (the elements kept by the gating)
+        default_node_mask = out['node_keep'][batch_idx].reshape(-1)     # nodes and edges kept by the gating
+        default_edge_mask = out['edge_keep'][batch_idx].reshape(-1)
         
         # Handle Attention Maps: the head-averaged cross-attention of each decoder layer (num_layers, num_queries, h*w), reshaped over the CNN feature map grid.
         attn = self._capture_cross_attention(x)

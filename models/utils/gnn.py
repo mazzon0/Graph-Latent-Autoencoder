@@ -32,11 +32,15 @@ class AttentionGraphBlock(nn.Module):
             nn.LeakyReLU()
         )
 
-    def forward(self, nodes: torch.Tensor, edges: torch.Tensor, global_attr: torch.Tensor):
+    def forward(self, nodes: torch.Tensor, edges: torch.Tensor, global_attr: torch.Tensor,
+                node_keep: torch.Tensor = None, edge_keep: torch.Tensor = None):
         """
         Args:
             nodes (torch.Tensor): Shape (B, N, d_node) -> Note: Node 0 is your Global Token!
             edges (torch.Tensor): Shape (B, N, N, d_edge)
+            node_keep (torch.Tensor, optional): Boolean mask (B, N, 1) of the nodes that are not pruned.
+                Pruned nodes are ignored by the attention and their output is zero.
+            edge_keep (torch.Tensor, optional): Boolean mask (B, N, N, 1) of the edges that are not pruned (their output is zero).
         """
         B, N, _ = nodes.shape
 
@@ -56,10 +60,15 @@ class AttentionGraphBlock(nn.Module):
         edge_bias = self.edge_to_bias(edges).squeeze(-1)
         
         total_scores = attention_scores + edge_bias
+        if node_keep is not None:
+            # pruned nodes cannot be attended (-1e9 instead of -inf, so that an image with no node left does not give NaN)
+            total_scores = total_scores.masked_fill(~node_keep.transpose(1, 2), -1e9)
         attention_weights = torch.softmax(total_scores, dim=-1)
         
         node_context = torch.bmm(attention_weights, V)
         new_nodes = self.node_update(node_context)
+        if node_keep is not None:
+            new_nodes = new_nodes * node_keep
         
         # Update Edges based on the new node representations
         nodes_i = new_nodes.unsqueeze(2).expand(B, N, N, -1)
@@ -68,6 +77,8 @@ class AttentionGraphBlock(nn.Module):
         global_expanded = global_attr.unsqueeze(1).unsqueeze(2).expand(B, N, N, self.d_global)
         edge_inputs = torch.cat([edges, nodes_i, nodes_j, global_expanded], dim=-1)
         new_edges = self.edge_update(edge_inputs)
+        if edge_keep is not None:
+            new_edges = new_edges * edge_keep
 
         # TODO Update Global Embedding
         
@@ -106,70 +117,6 @@ class GraphToPixelDecoder(nn.Module):
         x = torch.cat([pooled_graph, pos_emb], dim=-1)
         return self.mlp(x)
 
-
-'''class GraphToImageDecoder(nn.Module):
-    """
-    Decodes a graph into an image by pooling node features, passing them 
-    through an MLP to form a low-res grid, and upscaling via CNN.
-    """
-    def __init__(self, d_node: int, init_channels: int = 256, init_size: int = 4, out_channels: int = 3, train_with_sigmoid: bool = True):
-        super().__init__()
-        self.init_channels = init_channels
-        self.init_size = init_size
-        self.train_with_sigmoid = train_with_sigmoid
-        
-        self.mlp_readout = nn.Sequential(
-            nn.Linear(d_node * 2, 512),
-            nn.LayerNorm(512),
-            nn.LeakyReLU(),
-            nn.Linear(512, init_channels * init_size * init_size),
-            nn.LeakyReLU()
-        )
-        
-        self.upscaler = nn.Sequential(
-            # (Batch, 256, 4, 4) -> (Batch, 128, 8, 8)
-            nn.ConvTranspose2d(init_channels, 128, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(),
-            
-            # (Batch, 128, 8, 8) -> (Batch, 64, 16, 16)
-            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU(),
-            
-            # (Batch, 64, 16, 16) -> (Batch, 32, 32, 32)
-            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.LeakyReLU(),
-
-            # (Batch, 32, 32, 32) -> (Batch, 3, 64, 64)
-            nn.ConvTranspose2d(32, out_channels, kernel_size=4, stride=2, padding=1)
-        )
-
-    def forward(self, nodes: torch.Tensor):
-        """
-        Args:
-            nodes (torch.Tensor): Shape (B, N, d_node)
-        """
-        B, N, D = nodes.shape
-        
-        # Graph Pooling
-        mean_pool = nodes.mean(dim=1)           # Shape: (B, D)
-        max_pool = nodes.max(dim=1).values      # Shape: (B, D)
-        pooled_graph = torch.cat([mean_pool, max_pool], dim=-1)  # (B, D * 2)
-        
-        # MLP: low resolution image
-        flat_grid = self.mlp_readout(pooled_graph)
-        low_res_image = flat_grid.view(B, self.init_channels, self.init_size, self.init_size)
-        
-        # CNN Upscaler
-        final_image = self.upscaler(low_res_image)
-
-        if not self.training or self.train_with_sigmoid:
-            final_image = torch.sigmoid(final_image)
-        
-        return final_image'''
-    
 
 class GraphToImageDecoder(nn.Module):
     """
