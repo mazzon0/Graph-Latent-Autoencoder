@@ -1,18 +1,19 @@
 import torch
-from torchvision.transforms import v2
 from torchvision.utils import save_image
 import yaml
 import os
 import sys
-from PIL import Image
 
+from datasets import load_image
 from models import get_model, apply_sigmoid_if_requested
 from losses import get_loss
+from utils.schedule import warmup_progress
 from utils.experiment import resolve_checkpoint
 
 FROM_CHECKPOINT = True
 CHECKPOINT_FILE = ''
 EXPERIMENT_NAME = None
+DATASET = None
 APPLY_SIGMOID = True
 END_EPOCH = 0
 
@@ -24,10 +25,11 @@ def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
         if config:
-            global APPLY_SIGMOID, CHECKPOINT_FILE, EXPERIMENT_NAME, MODEL, LOSS, MODEL_CONFIG, LOSS_CONFIG, END_EPOCH
+            global DATASET, APPLY_SIGMOID, CHECKPOINT_FILE, EXPERIMENT_NAME, MODEL, LOSS, MODEL_CONFIG, LOSS_CONFIG, END_EPOCH
             END_EPOCH = config.get('end_epoch', END_EPOCH)
             CHECKPOINT_FILE = config.get('checkpoint_file', "")
             EXPERIMENT_NAME = config.get('experiment_name', None)
+            DATASET = config.get('dataset', "coco")
             MODEL = config.get('model', "cnn")
             MODEL_CONFIG = config.get('model_' + MODEL, None)
             LOSS = config.get('loss', dict())
@@ -38,17 +40,9 @@ def inference(image_path: str):
     else:                           print("Inference on CPU")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Data Preprocessing
-    val_transform = v2.Compose([
-        v2.Resize(64, antialias=True), 
-        v2.CenterCrop(size=(64, 64)),  
-        v2.ToImage(),
-        v2.ToDtype(torch.float32, scale=True),
-    ])
-
     # Load image
-    img_raw = Image.open(image_path).convert('RGB')
-    image = val_transform(img_raw).unsqueeze(0).to(device)
+    image_size = MODEL_CONFIG['image_shape'][1]
+    image = load_image(image_path, image_size).unsqueeze(0).to(device)
 
     # Initialize model, loss and optimizer
     model = get_model(MODEL, MODEL_CONFIG).to(device)
@@ -60,11 +54,13 @@ def inference(image_path: str):
         loaded_data = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(loaded_data['model_state_dict'], strict=True)
     
+    model.set_sparsity_progress(warmup_progress(END_EPOCH, LOSS.get('delay_epochs', 0), LOSS.get('ramp_epochs', 0)))
+
     # Inference
     inspector_payload = None
     model.eval()
     with torch.no_grad():
-        output = model(image)                                               # image logits
+        output = model(image)
         loss_dict = loss_fn(apply_sigmoid_if_requested(output, APPLY_SIGMOID), image, END_EPOCH)
         
         if hasattr(model, 'export_for_inspector'):

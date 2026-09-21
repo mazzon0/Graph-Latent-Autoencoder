@@ -10,6 +10,7 @@ from models import get_model, apply_sigmoid_if_requested
 from optimizers import get_lr_lambda, get_optimizer
 from losses import get_loss
 from datasets import get_dataset
+from utils.schedule import warmup_progress
 from utils.experiment import create_experiment_dir, resolve_checkpoint, log_metrics
 
 START_EPOCH = 0
@@ -21,6 +22,8 @@ APPLY_SIGMOID = True
 CONFIG_PATH = ''
 BATCH_SIZE = 1
 NUM_WORKERS = 1
+CACHE_DATASET = True
+IMAGE_SIZE = 64
 
 MODEL = None
 OPTIMIZER = None
@@ -36,7 +39,7 @@ def load_config(filename: str):
     with open(filename, 'r') as file:
         config = yaml.load(file, Loader=yaml.SafeLoader)
         if config:
-            global APPLY_SIGMOID, START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, EXPERIMENT_NAME, BATCH_SIZE, NUM_WORKERS, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG, DATASET
+            global APPLY_SIGMOID, START_EPOCH, END_EPOCH, FROM_CHECKPOINT, CHECKPOINT_FILE, EXPERIMENT_NAME, BATCH_SIZE, NUM_WORKERS, CACHE_DATASET, IMAGE_SIZE, MODEL, OPTIMIZER, LOSS, MODEL_CONFIG, OPTIMIZER_CONFIG, LOSS_CONFIG, DATASET
             START_EPOCH = config.get('start_epoch', 0)
             END_EPOCH = config.get('end_epoch', 1)
             FROM_CHECKPOINT = config.get('from_checkpoint', False)
@@ -44,6 +47,7 @@ def load_config(filename: str):
             EXPERIMENT_NAME = config.get('experiment_name', None)
             BATCH_SIZE = config.get('batch_size', 1)
             NUM_WORKERS = config.get('num_workers', 1)
+            CACHE_DATASET = config.get('cache_dataset', True)
 
             MODEL = config.get('model', "cnn")
             MODEL_CONFIG = config.get('model_' + MODEL, None)
@@ -51,6 +55,9 @@ def load_config(filename: str):
             OPTIMIZER_CONFIG = config.get('optimizer_' + OPTIMIZER, None)
             LOSS = config.get('loss', dict())
             APPLY_SIGMOID = MODEL_CONFIG.get('apply_sigmoid', True)
+            image_shape = MODEL_CONFIG.get('image_shape', [3, 64, 64])
+            assert image_shape[1] == image_shape[2], f"the dataset pipeline produces square images, but image_shape is {image_shape}"
+            IMAGE_SIZE = image_shape[1]
             DATASET = config.get('dataset', "coco")
 
 def collate_autoencoder(batch):
@@ -69,23 +76,18 @@ def train():
     print(f"Experiment directory: {experiment_dir}")
 
     # Data Preprocessing
+    # The dataset already stores the images resized and center cropped to IMAGE_SIZE (uint8)
     train_transform = v2.Compose([
-        v2.RandomResizedCrop(size=(64, 64), scale=(0.5, 1.0), ratio=(0.9, 1.1), antialias=True),
+        v2.RandomResizedCrop(size=(IMAGE_SIZE, IMAGE_SIZE), scale=(0.5, 1.0), ratio=(0.9, 1.1), antialias=True),
         v2.RandomHorizontalFlip(p=0.3),
         v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-        v2.ToImage(),
         v2.ToDtype(torch.float32, scale=True),
     ])
 
-    val_transform = v2.Compose([
-        v2.Resize(64, antialias=True), 
-        v2.CenterCrop(size=(64, 64)),  
-        v2.ToImage(),
-        v2.ToDtype(torch.float32, scale=True),
-    ])
+    val_transform = v2.ToDtype(torch.float32, scale=True)
 
     # Dataset
-    train_set, val_set = get_dataset(DATASET, train_transform, val_transform)
+    train_set, val_set = get_dataset(DATASET, IMAGE_SIZE, train_transform, val_transform, CACHE_DATASET)
 
     train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=True, collate_fn=collate_autoencoder, prefetch_factor=4)
     val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, collate_fn=collate_autoencoder, prefetch_factor=4)
@@ -112,6 +114,9 @@ def train():
     grad_norms = torch.zeros(num_batches, device=device)
     for epoch in range(START_EPOCH, END_EPOCH + 1):
         start = time.time()
+
+        # Sparsity schedule (the same used by the loss)
+        model.set_sparsity_progress(warmup_progress(epoch, LOSS.get('delay_epochs', 0), LOSS.get('ramp_epochs', 0)))
 
         # Train
         model.train()
