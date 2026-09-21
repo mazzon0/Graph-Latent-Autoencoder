@@ -1,5 +1,5 @@
 from .graph_latent_autoencoder_loss import GraphLatentAutoencoderLoss
-from .gating_regularizers import ProbabilityRegularizer, DiscreteRegularizer
+from .gating_regularizers import ProbabilityRegularizer, DiscreteRegularizer, BandRegularizer
 from .reconstruction_loss import L1Loss, L2Loss, BCELoss, SSIMLoss, HybridLoss
 
 def get_loss(config: dict):
@@ -32,6 +32,9 @@ def get_loss(config: dict):
         case 'discr':
             print("discr")
             nodes_reg = DiscreteRegularizer(0.5)
+        case 'band':
+            print("band")
+            nodes_reg = BandRegularizer(config.get('nodes_band', dict()))
 
     print("Edges Regularizer: ", end="")
     match config.get('edges', "probs"):
@@ -41,6 +44,9 @@ def get_loss(config: dict):
         case 'discr':
             print("discr")
             edges_reg = DiscreteRegularizer(0.5)
+        case 'band':
+            print("band")
+            edges_reg = BandRegularizer(config.get('edges_band', dict()))
 
     alpha = config.get('alpha', 1.0)
     beta  = config.get('beta', 1.0)
