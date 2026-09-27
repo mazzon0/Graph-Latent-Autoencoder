@@ -29,6 +29,8 @@ def get_model(name: str, config: dict):
     gnn_layers = config.get('gnn_layers', 4)
     node_threshold = config.get('node_threshold', 0.0)
     edge_threshold = config.get('edge_threshold', 0.0)
+    decoder = config.get('decoder', "pooled")
+    decoder_config = config.get('decoder_' + decoder, dict())
 
     print("Model: ", end="")
     match(name):
@@ -54,6 +56,8 @@ def get_model(name: str, config: dict):
                 d_global,
                 gnn_layers,
                 node_threshold,
-                edge_threshold)
+                edge_threshold,
+                decoder,
+                decoder_config)
 
     return None

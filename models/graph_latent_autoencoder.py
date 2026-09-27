@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from .base_autoencoder import BaseAutoencoder
 from .utils.transformer import DetrEmbeddingTransformer
-from .utils.gnn import AttentionGraphBlock, GraphToImageDecoder
+from .utils.gnn import AttentionGraphBlock
+from .utils.decoder import get_decoder
 
 class GraphLatentAutoencoder(BaseAutoencoder):
     """
@@ -25,7 +26,9 @@ class GraphLatentAutoencoder(BaseAutoencoder):
                  d_global: int = 64,
                  gnn_layers: int = 4,
                  node_threshold: float = 0.0,
-                 edge_threshold: float = 0.0):
+                 edge_threshold: float = 0.0,
+                 decoder: str = "pooled",
+                 decoder_config: dict = None):
         """
         Args:
             image_shape (list): [C, H, W] of the input image. 
@@ -33,6 +36,8 @@ class GraphLatentAutoencoder(BaseAutoencoder):
             node_threshold (float): Target confidence threshold for the nodes: nodes with a lower confidence are pruned.
             edge_threshold (float): Same for the edges. An edge is also pruned if one of its nodes is pruned.
                 The thresholds grow from 0 (dense graph) to these values following the sparsity schedule (see set_sparsity_progress).
+            decoder (str): Which graph to image decoder to use: 'pooled', 'slot' or 'crossattn' (see utils.decoder).
+            decoder_config (dict): Hyperparameters of that decoder.
         """
         super().__init__()
         assert(image_shape[0] == channels[0])   # The CNN input channels do not meet the image channels
@@ -98,16 +103,22 @@ class GraphLatentAutoencoder(BaseAutoencoder):
             self.gnn.append(AttentionGraphBlock(d_node, d_edge, d_global))
 
         # Image Generation
-        self.image_generator = GraphToImageDecoder(d_node, init_channels=256, init_size=4, out_channels=3)
+        self.decoder_name = decoder
+        self.image_generator = get_decoder(decoder, d_node, d_edge, d_global, image_shape, decoder_config or dict())
 
         self._init_weights()
 
     def _init_weights(self):
         """
         Initializes the convolutions and the linear layers with Kaiming normal (the network uses LeakyReLU).
-        The transformer is skipped, since nn.Transformer already initializes itself with Xavier uniform.
+        Every transformer (the DETR one, and the decoder's one if it has any) is skipped, since PyTorch already
+        initializes them with Xavier uniform, which is what their residual + LayerNorm structure expects.
         """
-        transformer_modules = set(self.transformer.modules())
+        transformer_modules = set()
+        for m in self.modules():
+            if isinstance(m, (nn.Transformer, nn.TransformerEncoder, nn.TransformerDecoder,
+                              nn.TransformerEncoderLayer, nn.TransformerDecoderLayer, nn.MultiheadAttention)):
+                transformer_modules.update(m.modules())
 
         for m in self.modules():
             if m in transformer_modules:
@@ -191,7 +202,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
             gnn_nodes, gnn_edges, gnn_global = gnn_layer(gnn_nodes, gnn_edges, gnn_global, node_keep, edge_keep)
 
         # Image Generation
-        reconstructed_image = self.image_generator(gnn_nodes)
+        reconstructed_image = self.image_generator(gnn_nodes, gnn_edges, gnn_global)
 
         return {
             'image': reconstructed_image,
@@ -311,5 +322,10 @@ class GraphLatentAutoencoder(BaseAutoencoder):
                 "relation_attention": relation_attn.cpu()
             }
         }
+
+        # Per-token masks, if the decoder produces any (the slot decoder does): (S, res, res), one map per rendered token
+        masks = getattr(self.image_generator, 'last_masks', None)
+        if masks is not None:
+            inspector_payload["decoder"] = {"masks": masks[batch_idx].cpu()}
         
         return inspector_payload
