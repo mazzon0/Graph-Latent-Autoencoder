@@ -104,9 +104,15 @@ class GraphLatentAutoencoder(BaseAutoencoder):
 
     def _init_weights(self):
         """
-        Initializes weights using Xavier uniform initialization.
+        Initializes the convolutions and the linear layers with Kaiming normal (the network uses LeakyReLU).
+        The transformer is skipped, since nn.Transformer already initializes itself with Xavier uniform.
         """
+        transformer_modules = set(self.transformer.modules())
+
         for m in self.modules():
+            if m in transformer_modules:
+                continue
+
             if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
                 nn.init.kaiming_normal_(m.weight, a=0.01, mode='fan_out', nonlinearity='leaky_relu')
                 if m.bias is not None:
