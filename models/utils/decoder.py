@@ -15,10 +15,6 @@ Presence is read from the values, not from a separate mask: a pruned node or edg
 gradient flowing from the decoder back into the pruning decision. The global token is always present.
 
 Decoders:
-    'pooled'    PooledGraphDecoder      mean+max pooling of the nodes into a single vector, then upscaling.
-                                        Scaffolding: it throws the structure away (it never reads the edges and
-                                        cannot tell one node from another), so it only says whether the encoder
-                                        produces useful features. It is the arm to beat, not a graph decoder.
     'slot'      SlotBroadcastDecoder    MONet / Slot Attention style: every token is broadcast over a grid, a
                                         shared conv net turns it into a feature map plus a mask logit, and the
                                         masks are softmaxed over the tokens (each pixel is explained by the
@@ -127,39 +123,6 @@ class GraphTokens(nn.Module):
         return torch.cat(tokens, dim=1), torch.cat(valid, dim=1)
 
 
-class PooledGraphDecoder(nn.Module):
-    """
-    Scaffolding decoder. The nodes are mean and max pooled into one vector, which is concatenated with a learned
-    positional embedding at every cell of a res x res grid and passed through an MLP, then upscaled to the image.
-
-    The edges and the global token are ignored, and pooling is permutation invariant, so this decoder cannot see
-    any structure: it exists to check that the encoder produces useful features.
-    """
-    def __init__(self, d_node: int, image_shape: list, res: int = 4, d_pos: int = 32, channels: int = 256):
-        super().__init__()
-        self.res = res
-        self.channels = channels
-        self.pos_embeddings = nn.Parameter(torch.randn(res, res, d_pos))
-        self.mlp = nn.Sequential(
-            nn.Linear(2 * d_node + d_pos, 512),
-            nn.LayerNorm(512),
-            nn.LeakyReLU(),
-            nn.Linear(512, channels),
-            nn.LeakyReLU()
-        )
-        self.upscaler = Upscaler(channels, image_shape[0], res, image_shape[1])
-
-    def forward(self, nodes: torch.Tensor, edges: torch.Tensor = None, global_: torch.Tensor = None):
-        B = nodes.shape[0]
-
-        pooled = torch.cat([nodes.mean(dim=1), nodes.max(dim=1).values], dim=-1)             # (B, 2 * d_node)
-        pooled = pooled.unsqueeze(1).unsqueeze(2).expand(-1, self.res, self.res, -1)
-        pos = self.pos_embeddings.unsqueeze(0).expand(B, -1, -1, -1)
-
-        grid = self.mlp(torch.cat([pooled, pos], dim=-1))                                   # (B, res, res, channels)
-        return self.upscaler(grid.permute(0, 3, 1, 2))
-
-
 class SlotBroadcastDecoder(nn.Module):
     """
     Every token is broadcast over a res x res grid, summed with the encoded grid coordinates, and passed through
@@ -169,12 +132,16 @@ class SlotBroadcastDecoder(nn.Module):
 
     Absent tokens get a mask logit of -inf, so they draw nothing and receive no gradient.
 
+    `layers` is the depth of the per token net and `upscaler_channels` the width of the first upscaling stage.
+
     Cost warning: the conv net runs on B * S maps, so the compute and the activation memory grow linearly with the
-    number of nodes. Slot Attention usually has under a dozen slots; a DETR encoder has `num_queries - 2`.
-    `res`, `hidden` and `feat` are the knobs to trade this off.
+    number of nodes AND with the batch size. Slot Attention usually has under a dozen slots; a DETR encoder has
+    `num_queries - 2`. `res`, `hidden`, `feat` and `layers` are the knobs to trade this off; the upscaler runs on
+    the composite only (B maps), so `upscaler_channels` is cheap capacity.
     """
     def __init__(self, d_node: int, d_edge: int, d_global: int, image_shape: list,
-                 res: int = 16, hidden: int = 64, feat: int = 32, n_freq: int = 4, edge_slots: int = 0):
+                 res: int = 16, hidden: int = 64, feat: int = 32, n_freq: int = 4, edge_slots: int = 0,
+                 layers: int = 3, upscaler_channels: int = 128):
         super().__init__()
         self.res = res
         self.feat = feat
@@ -182,12 +149,13 @@ class SlotBroadcastDecoder(nn.Module):
         self.register_buffer('coords', fourier_grid(res, n_freq))
         self.pos_proj = nn.Linear(self.coords.shape[-1], hidden)
         # no normalization here: the batch of maps is full of absent tokens, whose statistics are meaningless
-        self.net = nn.Sequential(
-            nn.Conv2d(hidden, hidden, kernel_size=3, stride=1, padding=1), nn.LeakyReLU(),
-            nn.Conv2d(hidden, hidden, kernel_size=3, stride=1, padding=1), nn.LeakyReLU(),
-            nn.Conv2d(hidden, feat + 1, kernel_size=3, stride=1, padding=1)     # feat channels + 1 mask logit
-        )
-        self.upscaler = Upscaler(feat, image_shape[0], res, image_shape[1])
+        assert layers >= 1, "the per token net needs at least the output layer"
+        net = []
+        for _ in range(layers - 1):
+            net += [nn.Conv2d(hidden, hidden, kernel_size=3, stride=1, padding=1), nn.LeakyReLU()]
+        net.append(nn.Conv2d(hidden, feat + 1, kernel_size=3, stride=1, padding=1))  # feat channels + 1 mask logit
+        self.net = nn.Sequential(*net)
+        self.upscaler = Upscaler(feat, image_shape[0], res, image_shape[1], base_channels=upscaler_channels)
         self.last_masks = None      # (B, S, res, res) of the last forward pass, for inspection
 
     def forward(self, nodes: torch.Tensor, edges: torch.Tensor = None, global_: torch.Tensor = None):
@@ -247,14 +215,6 @@ def get_decoder(name: str, d_node: int, d_edge: int, d_global: int, image_shape:
     """
     print("Decoder: ", end="")
     match name:
-        case 'pooled':
-            print("pooled")
-            return PooledGraphDecoder(
-                d_node,
-                image_shape,
-                res=config.get('res', 4),
-                d_pos=config.get('d_pos', 32),
-                channels=config.get('channels', 256))
         case 'slot':
             print("slot")
             return SlotBroadcastDecoder(
@@ -264,7 +224,9 @@ def get_decoder(name: str, d_node: int, d_edge: int, d_global: int, image_shape:
                 hidden=config.get('hidden', 64),
                 feat=config.get('feat', 32),
                 n_freq=config.get('n_freq', 4),
-                edge_slots=config.get('edge_slots', 0))
+                edge_slots=config.get('edge_slots', 0),
+                layers=config.get('layers', 3),
+                upscaler_channels=config.get('upscaler_channels', 128))
         case 'crossattn':
             print("crossattn")
             return CrossAttentionDecoder(
@@ -277,4 +239,4 @@ def get_decoder(name: str, d_node: int, d_edge: int, d_global: int, image_shape:
                 n_freq=config.get('n_freq', 4),
                 edge_slots=config.get('edge_slots', 0))
         case _:
-            raise ValueError(f"unknown decoder '{name}' (expected 'pooled', 'slot' or 'crossattn')")
+            raise ValueError(f"unknown decoder '{name}' (expected 'slot' or 'crossattn')")
