@@ -50,11 +50,15 @@ class DetrEmbeddingTransformer(nn.Module):
                  dropout: float = 0.1, 
                  activation: str = "relu",
                  max_seq_len: int = 5000,
-                 num_queries: int = 100):
+                 num_queries: int = 100,
+                 norm_first: bool = False):
         """
         Args:
             ... [Standard Transformer Args] ...
             num_queries (int): The maximum number of objects the model can detect per image.
+            norm_first (bool): If True the LayerNorm comes before the attention and the feed forward (pre-LN),
+                instead of after (post-LN, the PyTorch default). Pre-LN keeps the residual path clean, so deep
+                and wide transformers train without a carefully tuned warmup and tolerate a larger learning rate.
         """
         super().__init__()
         assert d_model % nhead == 0, f"d_model ({d_model}) must be divisible by nhead ({nhead})"
@@ -72,7 +76,8 @@ class DetrEmbeddingTransformer(nn.Module):
             dim_feedforward=dim_feedforward,
             dropout=dropout,
             activation=activation,
-            batch_first=True
+            batch_first=True,
+            norm_first=norm_first
         )
 
     def forward(self, 

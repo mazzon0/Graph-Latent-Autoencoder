@@ -103,6 +103,10 @@ def train():
         optimizer.load_state_dict(loaded_data['optimizer_state_dict'])
         best_loss = float(loaded_data.get('loss', float('inf')))
     
+    # Gradient clipping (0 disables it). A wide post-LN transformer can spike early: DETR clips at 0.1.
+    grad_clip = float(OPTIMIZER_CONFIG.get('grad_clip', 0.0))
+    print(f"Gradient clipping: {grad_clip if grad_clip > 0 else 'disabled'}")
+
     lr_lambda_name = OPTIMIZER_CONFIG.get('scheduler', "constant")
     lr_lambda = get_lr_lambda(lr_lambda_name, OPTIMIZER_CONFIG.get("scheduler_" + lr_lambda_name, dict()), END_EPOCH)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch=START_EPOCH-1)
@@ -132,6 +136,8 @@ def train():
 
             optimizer.zero_grad()
             loss['loss'].backward()
+            if grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             grad_norms[i] = model.get_first_layer().weight.grad.norm()
             optimizer.step()
 
