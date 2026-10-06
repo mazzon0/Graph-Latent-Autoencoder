@@ -45,15 +45,22 @@ Get-Content requirements.txt | Where-Object { $_ -notmatch '^(nvidia-|cuda-|trit
 pip install -r requirements-windows.txt
 ```
 
-Download the COCO dataset.
+Download the datasets: `coco` (default), `clevr` or `all`.
 For Linux systems:
 ```bash
-./download.sh
+./download.sh clevr
 ```
 For Windows systems:
 ```powershell
-powershell -ExecutionPolicy Bypass -File download.ps1
+powershell -ExecutionPolicy Bypass -File download.ps1 clevr
 ```
+CLEVR v1.0 is a 19 GB download, of which only the train/val images and the scene annotations (object attributes and relations) are extracted, in `data/datasets/clevr/CLEVR_v1.0`.
+Select the dataset with the `dataset` field of the configuration file (`"coco"` or `"clevr"`).
+
+**Dataset cache.** With `cache_dataset: true` (the default) the first run resizes every image once to the size given by `image_shape` in the model config, and stores the result next to the images (about 1.4 GB for COCO, 0.9 GB for CLEVR).
+Later runs load that file instead, which is much faster. It is rebuilt when the number of images or the image size change, and deleting it forces a rebuild.
+The augmentations are applied on the fly to the stored images, so crops are upscaled from the low resolution version and look softer than the validation images.
+With `cache_dataset: false` every image is loaded and resized on demand: the same images, but slower. Use it when data loading is not the bottleneck, or when the dataset does not fit in memory.
 
 ### Training
 
@@ -103,16 +110,16 @@ To start a new experiment from an old checkpoint, give an `experiment_name` and 
 ### General
 All configuration files needs some general values.
 
-`model` allows to select an autoencoder model, `optimizer` allows to select an optimizer and `dataset` allows to select a dataset.
+`model` allows to select an autoencoder model (`cnn`, `set` or `graph`, see [Models](#models)), `optimizer` allows to select an optimizer and `dataset` allows to select a dataset.
 `start_epoch` and `end_epoch` allows to choose the range of epochs for the training process. Epochs are 0 based. `start_epoch` and `end_epoch` are included in the range.
 
 `experiment_name` (optional) is the name of the directory of the experiment.
 
 It is possible to initialize the model and the optimizer from a checkpoint, by setting `from_checkpoint` to `true` and specifying the path of the model in `checkpoint_file`. If `from_checkpoint` is `false`, then `checkpoint_file` is ignored.
 
-It is possible to set the `batch_size` and `num_workers` values.
+It is possible to set the `batch_size` and `num_workers` values, and to enable or disable the dataset cache with `cache_dataset` (see [Setup](#setup)).
 
-About the loss, it is possible to select which `reconstruction_loss` to use (`hybrid` is a linear combination of `l1` and `ssim`). It is possible to select the regularizers for the latent graph: the sum of the probabilities `probs` or the count of elements `discr`. The CNN Autoencoder will return 0 for these values. It is possible to select the weights of these losses `alpha`, `beta` and `gamma` respectively for reconstruction loss, nodes regularizer and edge regularizer.
+About the loss, it is possible to select which `reconstruction_loss` to use (`hybrid` is a linear combination of `l1` and `ssim`). It is possible to select the regularizers for the latent graph: the sum of the probabilities `probs`, the count of elements `discr` or the `band` regularizer (see [Losses](#losses)). The CNN Autoencoder will return 0 for these values. It is possible to select the weights of these losses `alpha`, `beta` and `gamma` respectively for reconstruction loss, nodes regularizer and edge regularizer.
 
 ```yaml
 model: "cnn"
@@ -124,6 +131,7 @@ from_checkpoint: false
 checkpoint_file: "best.pth"
 batch_size: 128
 num_workers: 8
+cache_dataset: true
 
 loss:
   reconstruction: "l1" | "l2" | "ssim" | "bce" | "hybrid"
@@ -184,7 +192,12 @@ The number of layers of the CNN Encoder (and also CNN Decoder) is going to be `l
 
 `max_seq_len` is the maximum sequence length (or positional embedding limit) that the transformer can process.
 
-`num_queries` is the number of object queries (or learned positional embeddings) fed into the DETR decoder, defining the maximum number of graph nodes/elements the model can extract from image features.
+`norm_first` puts the LayerNorm before the attention and the feed forward (pre-LN) instead of after (post-LN, the PyTorch default).
+Pre-LN keeps the residual path clean, so a wide transformer trains without a carefully tuned warmup and tolerates a larger learning rate. It should be the same in both arms of a comparison.
+
+`num_queries` is the number of object queries (learned positional embeddings) fed into the DETR decoder.
+The first two queries are reserved for the global token and the edge context token, so the graph has `num_queries - 2` nodes
+(`num_queries: 64` gives 62 nodes).
 
 `d_node` is the feature dimension size for each node in the generated graph structure.
 
@@ -194,6 +207,22 @@ The number of layers of the CNN Encoder (and also CNN Decoder) is going to be `l
 
 `gnn_layers` is the number of message-passing layer iterations within the Graph Neural Network (GNN) module.
 
+`node_threshold` and `edge_threshold` are the target thresholds of the gating (`0` means no pruning, the graph is dense).
+Nodes with a confidence below `node_threshold` are pruned. Edges with a confidence below `edge_threshold` are pruned, and so are the edges of a pruned node.
+Pruned nodes and edges are ignored by the GNN (they cannot be attended) and are zero vectors after it.
+The thresholds start at 0 (dense graph) and grow linearly to their target, following the sparsity schedule (`delay_epochs` and `ramp_epochs` of the `loss` configuration, see [Losses](#losses)).
+
+`decoder` chooses the graph to image decoder, and the `decoder_<name>` section holds its hyperparameters.
+
+- `slot` broadcasts every token over a `res` x `res` grid and renders it with a `layers` deep conv net of width `hidden`, shared by all the tokens, into `feat` feature channels plus a mask logit. The masks are softmaxed over the tokens, so every pixel is split among the tokens that claim it, and the composite is upscaled to the image through stages starting at `upscaler_channels` channels. Its compute and its memory grow with the number of nodes times the batch size, while `upscaler_channels` runs on the composite only and is therefore cheap capacity.
+- `crossattn` uses the positions of a `res` x `res` grid as queries that cross-attend to the tokens, through `layers` transformer decoder layers of width `d`.
+
+`edge_slots` (for `slot` and `crossattn`) is the number of edges the decoder renders as tokens of their own: the strongest ones by feature norm, each one carrying its two endpoints.
+With `edge_slots: 0` the decoder only sees the nodes and the global token, which is the ablation arm where the latent space is a set rather than a graph.
+`n_freq` is the number of frequencies of the sinusoidal encoding of the grid coordinates.
+
+A pruned node or edge is a zero vector, and the decoders read it as absent: it gets no mask and draws nothing. The global token is always present.
+
 The output image is made of logits: the model does not apply any final activation.
 `apply_sigmoid` decides whether a sigmoid is applied to them (mapping the values to [0, 1]) before computing the loss, in training, validation and inference.
 It should be `true` for the `l1`, `l2`, `ssim` and `hybrid` losses, and `false` for `bce` (which works directly on the logits).
@@ -202,22 +231,72 @@ The images saved by the inference script always get the sigmoid.
 ```yaml
 model_graph:
   image_shape: [3, 64, 64]
-  channels: [3, 64, 72, 128]
-  d_model: 128
+  channels: [3, 64, 192, 512]
+  d_model: 512
   nhead: 8
   num_encoder_layers: 6
   num_decoder_layers: 6
-  dim_ff: 256
+  dim_ff: 2048
   dropout: 0.1
   activation: "relu"
+  norm_first: true
   max_seq_len: 5000
-  num_queries: 64
+  num_queries: 32
   d_node: 64
   d_edge: 64
   d_global: 64
-  gnn_layers: 4
+  gnn_layers: 6
+  node_threshold: 0.0
+  edge_threshold: 0.0
+  decoder: "slot"
+  decoder_slot:
+    res: 16
+    hidden: 256
+    feat: 128
+    n_freq: 4
+    layers: 3
+    upscaler_channels: 512
+    edge_slots: 8
+  decoder_crossattn:
+    res: 16
+    d: 128
+    nhead: 4
+    layers: 3
+    n_freq: 4
+    edge_slots: 8
   apply_sigmoid: true
 ```
+
+This is the ~50M parameter configuration of [configs/graph.yaml](configs/graph.yaml); `configs/set.yaml` is the same with
+`edge_slots: 0`. The memory of the slot decoder is `batch x slots x res^2 x hidden`, so it, and not the transformer,
+decides the batch size: on an 8 GiB card the set arm fits a batch of 48 and the graph arm a batch of 32.
+
+The **Set Latent Autoencoder** (`model: "set"`, field `model_set`) is the same model with the edges removed:
+its latent space is an unordered set of nodes plus the global token. It takes exactly the same fields as the graph
+model, and `d_edge`, `edge_threshold` and the `edges` regularizer are simply ignored (`edge_slots` must be `0`).
+
+It is the middle arm of the experiment:
+
+| model | latent space | what it adds |
+| --- | --- | --- |
+| `cnn` | one vector | - |
+| `set` | `num_queries - 2` nodes + a global token | several addressable slots |
+| `graph` | the same nodes + a global token + `(num_queries - 2)^2` edges | relations between the slots |
+
+so the gap between `graph` and `set` measures what the edges are worth, and the gap between `set` and `cnn` measures
+what splitting the latent space into slots is worth.
+
+It is not a separate implementation: it is `GraphLatentAutoencoder` with `use_edges=False`, which drops the edge
+predictor, the edge bias of the GNN attention, the edge update and the decoder edge slots, and leaves every other
+line of code shared. With the same weights loaded and the edge bias zeroed, the graph model reproduces the set model
+exactly, so a difference in the results can only come from the edges.
+The DETR query layout is deliberately left untouched (`[global, edge context, nodes...]`), so the same `num_queries`
+gives the same number of nodes in both arms; the edge context query is just never read.
+
+On the default configuration, the edges are 5% of the parameters (136,837 of 2,711,874) but most of the compute: the
+edge predictor runs `N^2 = 3844` times per image instead of `N = 62` times, and the latent holds 246,016 edge floats
+against 3,968 node floats.
+
 
 ### Optimizers
 
@@ -225,14 +304,24 @@ The **AdamW** optimizer can be configured by setting the learning rate `lr`, the
 
 The **SGD** optimizer can be configured by setting the learning rate `lr`, the `weight_decay`, the `momentum` and the `scheduler`.
 
+The `weight_decay` is applied only to the weights of the convolutions, of the linear layers and of the embeddings:
+every bias and every normalization scale is put in a group with no decay, since shrinking a LayerNorm scale or a bias
+towards 0 costs accuracy on a deep transformer. With `weight_decay: 0.0` there is a single group, as before.
+
+`grad_clip` clips the total gradient norm before every optimizer step (`0`, the default, disables it). A wide
+transformer can spike in the first epochs; `1.0` is a safe value with pre-LN, and DETR uses `0.1` with post-LN.
+
 The `scheduler` can be further customized, with the `scheduler_x` fields. `scheduler_exponential` allows `decay_rate`,
 and `scheduler_cosine_with_warmup` allows `warmup_epochs`.
-Currently, the scheduler updates the learning rate once per epoch.
+Currently, the scheduler updates the learning rate once per epoch, so `warmup_epochs` counts epochs and not steps.
+With a dataset of tens of thousands of images that is fine: the first epoch already runs thousands of steps at a
+fraction of the target learning rate.
 
 ```yaml
 optimizer_adamw:
   lr: 1e-4
-  weight_decay: 0.0
+  weight_decay: 0.01
+  grad_clip: 1.0
   scheduler: "constant" | "exponential" | "cosine" | "cosine_with_warmup"
   scheduler_cosine_with_warmup:
     warmup_epochs: 5
@@ -243,6 +332,18 @@ optimizer_adamw:
 The reconstruction loss functions can be configured within the field `reconstruction_x`, inside `loss`.
 
 `l1`, `l2` and `bce` allows a `reduction` parameter, which can be set to `none`, `sum` or `mean`.
+
+**Sparsity schedule.** `delay_epochs` and `ramp_epochs` (in `loss`) define a schedule with a progress from 0 (dense graph) to 1 (target sparsity):
+it stays at 0 for `delay_epochs` epochs, then grows linearly over `ramp_epochs` epochs (`ramp_epochs: 0` jumps to 1).
+The same schedule scales the gating thresholds of the model, the weights of the `probs` and `discr` regularizers, and the bounds of the `band` regularizer.
+The progress is logged as `gating_warmup`, and the number of nodes and edges kept by the gating as `nodes_kept` and `edges_kept`.
+
+**Band regularizer.** `nodes: "band"` and `edges: "band"` penalize an image if its number of kept nodes (or edges) is outside of `[min, max]`,
+configured in `nodes_band` and `edges_band`. Inside the band there is no penalty, outside it grows linearly (in units of `max`, so nodes and edges have a similar scale).
+The count is the one of the gating of the model (so `node_threshold` and `edge_threshold` must be greater than 0), and its gradient goes to all the confidences, also of the pruned elements.
+The bounds follow the sparsity schedule: at progress 0 they are `[0, number of elements]` (no penalty), at progress 1 they are `[min, max]`.
+The weights `beta` and `gamma` are not scaled by the schedule for this regularizer, because the bounds already are.
+The edges are much more numerous than the nodes (N x N), so `gamma` usually needs to be much smaller than `beta`.
 
 `hybrid` allows to set a transition of the value `alpha` (the relative weight between L1 and SSIM). The parameters `start_epoch`, `end_epoch`, `start_val`, `end_val` and `func` allows to set the transition.
 
@@ -257,6 +358,22 @@ loss:
     start_val: 0.2
     end_val: 0.5
     func: "linear" | "cosine"
+```
+
+```yaml
+loss:
+  nodes: "band"
+  edges: "band"
+  nodes_band:
+    min: 20
+    max: 40
+  edges_band:
+    min: 20
+    max: 40
+  beta: 1.0
+  gamma: 0.01
+  delay_epochs: 10
+  ramp_epochs: 10
 ```
 
 ### Inference Configuration
