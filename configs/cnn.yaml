@@ -7,6 +7,7 @@ from_checkpoint: false
 checkpoint_file: "best.pth"
 batch_size: 128
 num_workers: 8
+cache_dataset: true
 
 model_cnn:
   image_shape: [3, 64, 64]
