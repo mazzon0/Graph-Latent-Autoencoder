@@ -1,6 +1,7 @@
 import torch
 from .cnn_autoencoder import CnnAutoencoder
 from .graph_latent_autoencoder import GraphLatentAutoencoder
+from .set_latent_autoencoder import SetLatentAutoencoder
 
 def apply_sigmoid_if_requested(outputs: dict, apply_sigmoid: bool) -> dict:
     """
@@ -22,6 +23,7 @@ def get_model(name: str, config: dict):
     dropout = config.get('dropout', 0.1)
     activation = config.get('activation', "relu")
     max_seq_len = config.get('max_seq_len', 5000)
+    norm_first = config.get('norm_first', False)
     num_queries = config.get('num_queries', 64)
     d_node = config.get('d_node', 64)
     d_edge = config.get('d_edge', 64)
@@ -29,7 +31,7 @@ def get_model(name: str, config: dict):
     gnn_layers = config.get('gnn_layers', 4)
     node_threshold = config.get('node_threshold', 0.0)
     edge_threshold = config.get('edge_threshold', 0.0)
-    decoder = config.get('decoder', "pooled")
+    decoder = config.get('decoder', "slot")
     decoder_config = config.get('decoder_' + decoder, dict())
 
     print("Model: ", end="")
@@ -37,27 +39,30 @@ def get_model(name: str, config: dict):
         case 'cnn':
             print("cnn")
             return CnnAutoencoder(image_shape, channels, mlp_sizes)
-        case 'graph':
-            print('graph')
-            return GraphLatentAutoencoder(
-                image_shape,
-                channels,
-                d_model,
-                nhead,
-                num_encoder_layers,
-                num_decoder_layers,
-                dim_ff,
-                dropout,
-                activation,
-                max_seq_len,
-                num_queries,
-                d_node,
-                d_edge,
-                d_global,
-                gnn_layers,
-                node_threshold,
-                edge_threshold,
-                decoder,
-                decoder_config)
+        case 'graph' | 'set':
+            print(name)
+            arguments = dict(
+                image_shape=image_shape,
+                channels=channels,
+                d_model=d_model,
+                nhead=nhead,
+                num_encoder_layers=num_encoder_layers,
+                num_decoder_layers=num_decoder_layers,
+                dim_ff=dim_ff,
+                dropout=dropout,
+                activation=activation,
+                max_seq_len=max_seq_len,
+                norm_first=norm_first,
+                num_queries=num_queries,
+                d_node=d_node,
+                d_edge=d_edge,
+                d_global=d_global,
+                gnn_layers=gnn_layers,
+                node_threshold=node_threshold,
+                edge_threshold=edge_threshold,
+                decoder=decoder,
+                decoder_config=decoder_config)
+            # the two arms are built from the same arguments, so they can only differ by the edges
+            return GraphLatentAutoencoder(**arguments) if name == 'graph' else SetLatentAutoencoder(**arguments)
 
     return None

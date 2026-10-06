@@ -24,11 +24,13 @@ class GraphLatentAutoencoderLoss(nn.Module):
         losses['nodes'] = self.nodes_loss(outputs['node_conf'], outputs.get('node_keep'), progress)
         losses['edges'] = self.edges_loss(outputs['edge_conf'], outputs.get('edge_keep'), progress)
 
-        # Number of elements kept after gating
+        # Number of elements kept after gating (a model without a latent graph reports neither,
+        # and a model without edges, see SetLatentAutoencoder, reports only the nodes)
         if outputs.get('node_keep') is not None:
             losses['nodes_kept'] = outputs['node_keep'].flatten(1).sum(dim=1).float().mean()
-            losses['edges_kept'] = outputs['edge_keep'].flatten(1).sum(dim=1).float().mean()
             losses['node_threshold'] = outputs['node_threshold'].float()
+        if outputs.get('edge_keep') is not None:
+            losses['edges_kept'] = outputs['edge_keep'].flatten(1).sum(dim=1).float().mean()
             losses['edge_threshold'] = outputs['edge_threshold'].float()
 
         # Reconstruction evaluation

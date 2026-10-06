@@ -20,6 +20,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
                  dropout: float = 0.1, 
                  activation: str = "relu",
                  max_seq_len: int = 5000,
+                 norm_first: bool = False,
                  num_queries: int = 100,
                  d_node: int = 64,
                  d_edge: int = 64,
@@ -27,7 +28,8 @@ class GraphLatentAutoencoder(BaseAutoencoder):
                  gnn_layers: int = 4,
                  node_threshold: float = 0.0,
                  edge_threshold: float = 0.0,
-                 decoder: str = "pooled",
+                 use_edges: bool = True,
+                 decoder: str = "slot",
                  decoder_config: dict = None):
         """
         Args:
@@ -36,7 +38,10 @@ class GraphLatentAutoencoder(BaseAutoencoder):
             node_threshold (float): Target confidence threshold for the nodes: nodes with a lower confidence are pruned.
             edge_threshold (float): Same for the edges. An edge is also pruned if one of its nodes is pruned.
                 The thresholds grow from 0 (dense graph) to these values following the sparsity schedule (see set_sparsity_progress).
-            decoder (str): Which graph to image decoder to use: 'pooled', 'slot' or 'crossattn' (see utils.decoder).
+            use_edges (bool): If False the edges are dropped everywhere (predictor, GNN and decoder) and the latent
+                space is a set of nodes plus the global token. See SetLatentAutoencoder, which is this model with the flag off.
+            norm_first (bool): Pre-LN instead of post-LN in the transformer (see DetrEmbeddingTransformer).
+            decoder (str): Which graph to image decoder to use: 'slot' or 'crossattn' (see utils.decoder).
             decoder_config (dict): Hyperparameters of that decoder.
         """
         super().__init__()
@@ -52,6 +57,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         self.num_decoder_layers = num_decoder_layers
         self.node_threshold_target = node_threshold
         self.edge_threshold_target = edge_threshold
+        self.use_edges = use_edges
         self.sparsity_progress = 1.0
 
         # CNN Feature Extraction
@@ -72,7 +78,8 @@ class GraphLatentAutoencoder(BaseAutoencoder):
             dropout=dropout,
             activation=activation,
             max_seq_len=max_seq_len,
-            num_queries=num_queries
+            num_queries=num_queries,
+            norm_first=norm_first
         )
 
         # Nodes / Edges / Global tokens processing
@@ -88,7 +95,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
             nn.BatchNorm1d(d_model),
             nn.LeakyReLU(),
             nn.Linear(d_model, d_edge + 1)      # 'd_edge' edges + 1 confidence score
-        )
+        ) if use_edges else None
 
         self.global_predictor = nn.Sequential(
             nn.Linear(d_model, d_global * 2),
@@ -100,11 +107,13 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         # GNN
         self.gnn = nn.ModuleList()
         for i in range(gnn_layers):
-            self.gnn.append(AttentionGraphBlock(d_node, d_edge, d_global))
+            self.gnn.append(AttentionGraphBlock(d_node, d_edge, d_global, use_edges))
 
         # Image Generation
         self.decoder_name = decoder
-        self.image_generator = get_decoder(decoder, d_node, d_edge, d_global, image_shape, decoder_config or dict())
+        decoder_config = decoder_config or dict()
+        assert use_edges or decoder_config.get('edge_slots', 0) == 0,             "use_edges is False, but the decoder was given edge_slots > 0: there are no edges to render"
+        self.image_generator = get_decoder(decoder, d_node, d_edge, d_global, image_shape, decoder_config)
 
         self._init_weights()
 
@@ -134,7 +143,10 @@ class GraphLatentAutoencoder(BaseAutoencoder):
                 nn.init.constant_(m.bias, 0)
 
         if hasattr(self, 'transformer') and hasattr(self.transformer, 'query_embed'):
-            nn.init.xavier_uniform_(self.transformer.query_embed)
+            # Unit variance, like DETR's nn.Embedding and like the constructor of DetrEmbeddingTransformer.
+            # Xavier here would give std sqrt(2/(num_queries + d_model)) ~ 0.06, which makes the object queries
+            # nearly identical to each other and very slow to differentiate.
+            nn.init.normal_(self.transformer.query_embed, mean=0.0, std=1.0)
 
     def forward(self, x: torch.Tensor):
         """
@@ -167,13 +179,15 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         nodes = nodes_out_flat.reshape(B, N, -1)
 
         # Edges
-        nodes_i = node_tokens.unsqueeze(2).expand(B, N, N, D)   # (B, N, 1, D) -> (B, N, N, D)
-        nodes_j = node_tokens.unsqueeze(1).expand(B, N, N, D)   # (B, 1, N, D) -> (B, N, N, D)
-        edge_context = edge_token.unsqueeze(1).unsqueeze(2).expand(B, N, N, D)  # (B, 1, 1, D) -> (B, N, N, D)
-        edge_inputs = torch.cat([edge_context, nodes_i, nodes_j], dim=-1)
-        edges_flat = edge_inputs.reshape(B * N * N, D * 3)
-        edges_out_flat = self.edge_predictor(edges_flat)
-        edges = edges_out_flat.reshape(B, N, N, -1)
+        edges = None
+        if self.use_edges:
+            nodes_i = node_tokens.unsqueeze(2).expand(B, N, N, D)   # (B, N, 1, D) -> (B, N, N, D)
+            nodes_j = node_tokens.unsqueeze(1).expand(B, N, N, D)   # (B, 1, N, D) -> (B, N, N, D)
+            edge_context = edge_token.unsqueeze(1).unsqueeze(2).expand(B, N, N, D)  # (B, 1, 1, D) -> (B, N, N, D)
+            edge_inputs = torch.cat([edge_context, nodes_i, nodes_j], dim=-1)
+            edges_flat = edge_inputs.reshape(B * N * N, D * 3)
+            edges_out_flat = self.edge_predictor(edges_flat)
+            edges = edges_out_flat.reshape(B, N, N, -1)
 
         # Global
         global_out = self.global_predictor(global_token)
@@ -181,17 +195,23 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         # Confidence scores
         node_features = nodes[..., :-1]               # (B, N, d_node)
         node_conf = torch.sigmoid(nodes[..., -1:])    # (B, N, 1)
-        edge_features = edges[..., :-1]               # (B, N, N, d_edge)
-        edge_conf = torch.sigmoid(edges[..., -1:])    # (B, N, N, 1)
+        if self.use_edges:
+            edge_features = edges[..., :-1]               # (B, N, N, d_edge)
+            edge_conf = torch.sigmoid(edges[..., -1:])    # (B, N, N, 1)
+        else:
+            # a 1-D placeholder, so that the shared loss and the regularizers skip the edges (see CnnAutoencoder)
+            edge_conf = torch.zeros(1, dtype=torch.float32, device=x.device)
 
         # Gating: nodes and edges below the threshold are pruned. An edge is also pruned if one of its nodes is pruned.
         node_threshold = self.node_threshold_target * self.sparsity_progress
         edge_threshold = self.edge_threshold_target * self.sparsity_progress
         node_keep = node_conf > node_threshold                                                        # (B, N, 1)
-        edge_keep = (edge_conf > edge_threshold) & node_keep.unsqueeze(2) & node_keep.unsqueeze(1)    # (B, N, N, 1)
-
         nodes_out = node_features * node_conf * node_keep
-        edges_out = edge_features * edge_conf * edge_keep
+
+        edge_keep, edges_out = None, None
+        if self.use_edges:
+            edge_keep = (edge_conf > edge_threshold) & node_keep.unsqueeze(2) & node_keep.unsqueeze(1)    # (B, N, N, 1)
+            edges_out = edge_features * edge_conf * edge_keep
 
         # GNN
         gnn_nodes = nodes_out
@@ -207,14 +227,14 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         return {
             'image': reconstructed_image,
             'nodes': gnn_nodes,
-            'edges': gnn_edges,
+            'edges': gnn_edges if self.use_edges else edge_conf,
             'global': gnn_global,
             'node_conf': node_conf,
             'edge_conf': edge_conf,
             'node_keep': node_keep,
             'edge_keep': edge_keep,
             'node_threshold': torch.tensor(node_threshold, device=x.device),
-            'edge_threshold': torch.tensor(edge_threshold, device=x.device),
+            'edge_threshold': torch.tensor(edge_threshold, device=x.device) if self.use_edges else None,
         }
 
     def set_sparsity_progress(self, progress: float):
@@ -264,19 +284,25 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         out = self.forward(x)
         
         gnn_nodes_sample = out['nodes'][batch_idx]       # Shape: (N, d_node)
-        edge_conf_sample = out['edge_conf'][batch_idx]   # Shape: (N, N, 1)
         node_conf_sample = out['node_conf'][batch_idx]   # Shape: (N, 1)
         
         num_nodes = gnn_nodes_sample.shape[0]
         num_layers = self.num_decoder_layers
         
         # Build Dense (N, N) Adjacency Matrix into Flattened Coordinate Lists
-        # Generates row indices and col indices for all possible directed edges
-        rows, cols = torch.meshgrid(torch.arange(num_nodes, device=x.device), 
-                                    torch.arange(num_nodes, device=x.device), 
-                                    indexing='ij')
-        edge_indices = torch.stack([rows.flatten(), cols.flatten()], dim=-1)    # Shape: (N*N, 2)
-        edge_conf_flat = edge_conf_sample.reshape(-1)                           # Shape: (N*N,)
+        # Generates row indices and col indices for all possible directed edges.
+        # A model without edges (use_edges=False) reports an empty edge set.
+        if self.use_edges:
+            rows, cols = torch.meshgrid(torch.arange(num_nodes, device=x.device), 
+                                        torch.arange(num_nodes, device=x.device), 
+                                        indexing='ij')
+            edge_indices = torch.stack([rows.flatten(), cols.flatten()], dim=-1)    # Shape: (N*N, 2)
+            edge_conf_flat = out['edge_conf'][batch_idx].reshape(-1)                # Shape: (N*N,)
+            default_edge_mask = out['edge_keep'][batch_idx].reshape(-1)
+        else:
+            edge_indices = torch.zeros(0, 2, dtype=torch.long, device=x.device)
+            edge_conf_flat = torch.zeros(0, device=x.device)
+            default_edge_mask = torch.zeros(0, dtype=torch.bool, device=x.device)
         
         # Create default string structures and boolean masks for UI initialization
         node_conf_flat = node_conf_sample.squeeze(-1)
@@ -284,8 +310,7 @@ class GraphLatentAutoencoder(BaseAutoencoder):
         default_edge_names = [f"Rel {src.item()}➔{dst.item()}" for src, dst in edge_indices]
         
         # Default boolean visualization arrays (the elements kept by the gating)
-        default_node_mask = out['node_keep'][batch_idx].reshape(-1)     # nodes and edges kept by the gating
-        default_edge_mask = out['edge_keep'][batch_idx].reshape(-1)
+        default_node_mask = out['node_keep'][batch_idx].reshape(-1)     # nodes kept by the gating
         
         # Handle Attention Maps: the head-averaged cross-attention of each decoder layer (num_layers, num_queries, h*w), reshaped over the CNN feature map grid.
         attn = self._capture_cross_attention(x)
